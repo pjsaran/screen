@@ -109,13 +109,26 @@ public sealed class IpcClient : IAsyncDisposable
                 $"Captr.App.exe was not found at {exePath}, so no recording host could be started.");
         }
 
-        // Detached: the host must survive this CLI process ending (SPEC §4).
+        // UseShellExecute = true is LOAD-BEARING, not a style choice.
+        //
+        // With UseShellExecute = false the host inherits this process's stdout and
+        // stderr handles. The host then outlives us holding those handles open, so
+        // any caller that REDIRECTS our output — `captr start > log.txt`, a
+        // PowerShell `$out = & captr start`, or a Task Scheduler action that
+        // captures output — blocks until the whole recording ends, because the
+        // pipe never sees end-of-file. `captr start` appeared to work
+        // interactively and hung for hours under a script; scheduled recording is
+        // SPEC §10's primary use case, so this must not regress.
+        //
+        // ShellExecuteEx starts the host with no inherited handles at all, which
+        // is exactly the detachment SPEC §4 wants. The host is a WinExe, so no
+        // console window appears.
         Process.Start(new ProcessStartInfo
         {
             FileName = exePath,
             ArgumentList = { "--host" },
-            UseShellExecute = false,
-            CreateNoWindow = true,
+            UseShellExecute = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
         });
     }
 
