@@ -1,3 +1,5 @@
+using Captr.Core.Hosting;
+
 namespace Captr.App;
 
 /// <summary>
@@ -18,8 +20,17 @@ public static class HostEntryPoint
     /// <summary>Runs the recording host until it is idle long enough to exit.</summary>
     public static int Run(string[] args)
     {
-        // Placeholder until WP7 (host lifecycle). Exits immediately with success so
-        // the role switch is testable from day one.
-        return 0;
+        string version = typeof(HostEntryPoint).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            is [System.Reflection.AssemblyInformationalVersionAttribute info, ..]
+            ? info.InformationalVersion
+            : "unknown";
+
+        // The host is a console-less async program; blocking the main thread here
+        // is the entry point, where synchronous waiting is explicitly permitted
+        // (SPEC §12: "no synchronous blocking … OUTSIDE the entry point").
+#pragma warning disable VSTHRD002
+        return new HostRuntime(version).RunAsync(CancellationToken.None).GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
     }
 }

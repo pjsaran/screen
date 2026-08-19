@@ -1,3 +1,5 @@
+using Captr.Core.Cli;
+
 namespace Captr.Cli;
 
 /// <summary>
@@ -7,10 +9,5 @@ namespace Captr.Cli;
 /// </summary>
 public static class Program
 {
-    public static async Task<int> Main(string[] args)
-    {
-        // Placeholder until WP8 wires the System.CommandLine tree from Captr.Core.
-        await Console.Out.WriteLineAsync("captr (scaffold) — commands arrive in WP8.");
-        return 0;
-    }
+    public static Task<int> Main(string[] args) => CliApplication.RunAsync(args);
 }
