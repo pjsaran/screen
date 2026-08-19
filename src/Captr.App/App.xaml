@@ -5,12 +5,14 @@
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
     <!-- No StartupUri: Program.cs owns startup so the host role never touches WPF. -->
     <Application.Resources>
-        <ResourceDictionary>
+        <ResourceDictionary xmlns:views="clr-namespace:Captr.App.Views">
             <ResourceDictionary.MergedDictionaries>
                 <!-- WPF UI theme resources: system theme + accent (SPEC §9). -->
                 <ui:ThemesDictionary Theme="Unknown" />
                 <ui:ControlsDictionary />
             </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+            <views:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

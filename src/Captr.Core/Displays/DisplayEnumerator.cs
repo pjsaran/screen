@@ -56,7 +56,7 @@ public sealed class DisplayEnumerator : IDisplayEnumerator
                         string gdiName = description.DeviceName;
                         if (configByGdiName.TryGetValue(gdiName, out WindowsDisplayConfig? config))
                         {
-                            displays.Add(BuildDisplayInfo(description, config, (int)adapterIndex, flatOutputIndex));
+                            displays.Add(BuildDisplayInfo(description, config, (int)adapterIndex, (int)outputIndex, flatOutputIndex));
                         }
 
                         // The flat index advances for every attached output, matched
@@ -74,6 +74,7 @@ public sealed class DisplayEnumerator : IDisplayEnumerator
         OutputDescription description,
         WindowsDisplayConfig config,
         int adapterIndex,
+        int outputIndexOnAdapter,
         int flatOutputIndex)
     {
         int width = description.DesktopCoordinates.Right - description.DesktopCoordinates.Left;
@@ -86,6 +87,7 @@ public sealed class DisplayEnumerator : IDisplayEnumerator
             FriendlyName = config.FriendlyName,
             DxgiOutputIndex = flatOutputIndex,
             DxgiAdapterIndex = adapterIndex,
+            DxgiOutputIndexOnAdapter = outputIndexOnAdapter,
             Width = width,
             Height = height,
             VirtualX = description.DesktopCoordinates.Left,

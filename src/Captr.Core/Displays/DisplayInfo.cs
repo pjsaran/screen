@@ -31,6 +31,10 @@ public sealed record DisplayInfo
     /// <summary>DXGI adapter (GPU) index owning this output.</summary>
     public required int DxgiAdapterIndex { get; init; }
 
+    /// <summary>Output index WITHIN its adapter (what IDXGIAdapter.EnumOutputs
+    /// takes) — used by the preview thumbnails; capture uses the flat index.</summary>
+    public int DxgiOutputIndexOnAdapter { get; init; }
+
     /// <summary>Native (physical-pixel) resolution.</summary>
     public required int Width { get; init; }
 

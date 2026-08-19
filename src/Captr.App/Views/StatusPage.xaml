@@ -1,0 +1,49 @@
+<Page
+    x:Class="Captr.App.Views.StatusPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="Status">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="24" MaxWidth="900">
+            <TextBlock Text="{Binding StateText}" FontSize="28" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding DetailText}" Margin="0,4,0,0" Opacity="0.8" />
+            <TextBlock Text="{Binding DiskText}" Margin="0,4,0,0" Opacity="0.8" />
+            <TextBlock Text="{Binding DegradationText}" Margin="0,8,0,0" Foreground="Orange" FontWeight="SemiBold"
+                       TextWrapping="Wrap" />
+            <TextBlock Text="{Binding LastError}" Margin="0,8,0,0" Foreground="IndianRed" TextWrapping="Wrap" />
+
+            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                <ui:Button Content="Start recording" Appearance="Primary" Command="{Binding StartCommand}"
+                           Visibility="{Binding IsRecording, Converter={StaticResource InverseBoolToVisibility}}" />
+                <ui:Button Content="Pause" Margin="8,0,0,0" Command="{Binding PauseCommand}"
+                           Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}}" />
+                <ui:Button Content="Resume" Margin="8,0,0,0" Command="{Binding ResumeCommand}"
+                           Visibility="{Binding IsPaused, Converter={StaticResource BoolToVisibility}}" />
+                <ui:Button Content="Stop" Margin="8,0,0,0" Appearance="Danger" Command="{Binding StopCommand}"
+                           Visibility="{Binding IsRecording, Converter={StaticResource BoolToVisibility}}" />
+            </StackPanel>
+
+            <TextBlock Text="Displays" FontSize="18" FontWeight="SemiBold" Margin="0,24,0,8" />
+            <ItemsControl ItemsSource="{Binding Displays}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Margin="0,0,12,12" Padding="8" CornerRadius="8"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <StackPanel>
+                                <Image Source="{Binding Thumbnail}" Width="240" Height="135" Stretch="Uniform" />
+                                <TextBlock Text="{Binding Label}" Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
+                                           MaxWidth="240" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

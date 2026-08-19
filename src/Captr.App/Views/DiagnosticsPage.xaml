@@ -1,0 +1,17 @@
+<Page
+    x:Class="Captr.App.Views.DiagnosticsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="Diagnostics">
+    <StackPanel Margin="24" MaxWidth="640" HorizontalAlignment="Left">
+        <TextBlock Text="Diagnostics" FontSize="24" FontWeight="SemiBold" />
+        <TextBlock Margin="0,12,0,0" TextWrapping="Wrap"
+                   Text="The support bundle contains the session journals, application logs, integrity records, encoder log tails, and system information. It contains no video content and no secrets." />
+        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+            <ui:Button Content="Export support bundle" Appearance="Primary" Command="{Binding ExportBundleCommand}" />
+            <ui:Button Content="Open log folder" Margin="8,0,0,0" Command="{Binding OpenLogsCommand}" />
+        </StackPanel>
+        <TextBlock Text="{Binding Message}" Margin="0,12,0,0" TextWrapping="Wrap" />
+    </StackPanel>
+</Page>

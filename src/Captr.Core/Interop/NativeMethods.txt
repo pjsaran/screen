@@ -55,6 +55,10 @@ SetThreadExecutionState
 ShutdownBlockReasonCreate
 ShutdownBlockReasonDestroy
 
+// --- Global hotkeys (SPEC §9) ---
+RegisterHotKey
+UnregisterHotKey
+
 // --- Credential storage (SPEC §7) ---
 CredRead
 CredWrite

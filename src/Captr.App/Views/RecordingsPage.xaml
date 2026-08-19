@@ -1,0 +1,54 @@
+<Page
+    x:Class="Captr.App.Views.RecordingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="Recordings">
+    <DockPanel Margin="24">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+            <TextBlock Text="Recordings" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <ui:Button Content="Refresh" Margin="16,0,0,0" Command="{Binding RefreshCommand}" />
+            <TextBlock Text="{Binding Message}" Margin="16,0,0,0" VerticalAlignment="Center" Opacity="0.8" />
+        </StackPanel>
+        <ItemsControl ItemsSource="{Binding Recordings}">
+            <ItemsControl.Template>
+                <ControlTemplate TargetType="ItemsControl">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsPresenter />
+                    </ScrollViewer>
+                </ControlTemplate>
+            </ItemsControl.Template>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Margin="0,0,0,8" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ControlFillColorDefaultBrush}">
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                            <TextBlock Opacity="0.8" Margin="0,2,0,0">
+                                <Run Text="{Binding Started, Mode=OneWay}" /> ·
+                                <Run Text="{Binding Duration, Mode=OneWay}" /> ·
+                                <Run Text="{Binding Size, Mode=OneWay}" /> ·
+                                <Run Text="{Binding Coverage, Mode=OneWay}" /> ·
+                                <Run Text="{Binding State, Mode=OneWay}" />
+                            </TextBlock>
+                            <TextBlock Text="{Binding VerifyResult}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <ui:Button Content="Open folder" FontSize="12"
+                                           Command="{Binding DataContext.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                           CommandParameter="{Binding}" />
+                                <ui:Button Content="Play" FontSize="12" Margin="8,0,0,0"
+                                           Command="{Binding DataContext.PlayCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                           CommandParameter="{Binding}" />
+                                <ui:Button Content="Verify" FontSize="12" Margin="8,0,0,0"
+                                           Command="{Binding DataContext.VerifyCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                           CommandParameter="{Binding}" />
+                                <ui:Button Content="Delete…" FontSize="12" Margin="8,0,0,0" Appearance="Danger"
+                                           Click="OnDeleteClicked" Tag="{Binding}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </DockPanel>
+</Page>

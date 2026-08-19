@@ -59,6 +59,16 @@ dotnet_naming_style.underscore_camel.required_prefix = _
 dotnet_diagnostic.CS1591.severity = none
 dotnet_diagnostic.CS1573.severity = none
 
+[src/Captr.App/**.cs]
+# The VSTHRD UI-thread rules below are written for JoinableTaskFactory hosts
+# (Visual Studio extensions). In a plain WPF app, Dispatcher.BeginInvoke and
+# async event handlers ARE the platform idiom, and there is no JTF to use.
+# The genuinely dangerous rules (sync-over-async VSTHRD002/103) remain errors.
+dotnet_diagnostic.VSTHRD001.severity = none   # Dispatcher.BeginInvoke is the WPF way
+dotnet_diagnostic.VSTHRD100.severity = none   # async void event handlers are the WPF way
+dotnet_diagnostic.VSTHRD101.severity = none   # async lambda on RoutedEventHandler
+dotnet_diagnostic.VSTHRD110.severity = none   # fire-and-forget BeginInvoke returns DispatcherOperation
+
 [tests/**.cs]
 # Test method names are sentences (Underscores_between_words) and self-documenting;
 # doc-comment and naming style rules relax accordingly.

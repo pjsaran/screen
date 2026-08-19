@@ -20,6 +20,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- WPF removes System.IO from the implicit usings because Shapes.Path clashes
+         with IO.Path; we use no XAML shapes, so bring the IO namespace back. -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Captr.Core\Captr.Core.csproj" />
     <PackageReference Include="WPF-UI" />
     <PackageReference Include="CommunityToolkit.Mvvm" />

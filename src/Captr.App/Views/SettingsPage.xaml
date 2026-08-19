@@ -1,0 +1,71 @@
+<Page
+    x:Class="Captr.App.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="Settings">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="24" MaxWidth="640" HorizontalAlignment="Left">
+            <TextBlock Text="Settings" FontSize="24" FontWeight="SemiBold" />
+
+            <TextBlock Text="Displays to record" FontWeight="SemiBold" Margin="0,20,0,4" />
+            <TextBlock Opacity="0.7" TextWrapping="Wrap"
+                       Text="New displays are recorded automatically until you untick them here." />
+            <ItemsControl ItemsSource="{Binding Displays}" Margin="0,6,0,0">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <CheckBox IsChecked="{Binding Included}" Content="{Binding Label}" Margin="0,2,0,2" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Text="Frame rate" FontWeight="SemiBold" Margin="0,16,0,4" />
+            <ui:NumberBox Value="{Binding FrameRate}" Minimum="1" Maximum="60" MaxWidth="160" HorizontalAlignment="Left" />
+
+            <TextBlock Text="Quality preset" FontWeight="SemiBold" Margin="0,16,0,4" />
+            <ComboBox ItemsSource="{Binding PresetNames}" SelectedItem="{Binding QualityPreset}"
+                      MaxWidth="240" HorizontalAlignment="Left" />
+            <TextBlock Text="Numeric quality override (advanced; empty = use preset)" Opacity="0.7" Margin="0,8,0,2" />
+            <TextBox Text="{Binding QualityOverride}" MaxWidth="160" HorizontalAlignment="Left" />
+
+            <TextBlock Text="Working folder" FontWeight="SemiBold" Margin="0,16,0,4" />
+            <TextBox Text="{Binding WorkingFolder}" />
+
+            <TextBlock Text="Output naming pattern" FontWeight="SemiBold" Margin="0,16,0,4" />
+            <TextBox Text="{Binding OutputPattern}" />
+            <TextBlock Opacity="0.7" Margin="0,4,0,0"
+                       Text="Tokens: {date} {start} {end} {duration} {machine} {user} {label}" />
+
+            <TextBlock Text="Keep local files for (days, after delivery confirms)" FontWeight="SemiBold" Margin="0,16,0,4" />
+            <ui:NumberBox Value="{Binding RetentionDays}" Minimum="0" Maximum="365" MaxWidth="160" HorizontalAlignment="Left" />
+
+            <TextBlock Text="Global hotkeys" FontWeight="SemiBold" Margin="0,16,0,4" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="220" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition /><RowDefinition /><RowDefinition />
+                </Grid.RowDefinitions>
+                <TextBlock Text="Start:" VerticalAlignment="Center" Margin="0,2" />
+                <TextBox Grid.Column="1" Text="{Binding HotkeyStart}" Margin="8,2" />
+                <TextBlock Grid.Row="1" Text="Pause:" VerticalAlignment="Center" Margin="0,2" />
+                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding HotkeyPause}" Margin="8,2" />
+                <TextBlock Grid.Row="2" Text="Stop:" VerticalAlignment="Center" Margin="0,2" />
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding HotkeyStop}" Margin="8,2" />
+            </Grid>
+            <TextBlock Opacity="0.7" Margin="0,4,0,0" Text="Format: Ctrl+Alt+F9 (empty disables)" />
+
+            <CheckBox Content="Start minimised to tray" IsChecked="{Binding StartMinimised}" Margin="0,16,0,0" />
+            <CheckBox Content="Closing the window hides to tray" IsChecked="{Binding CloseToTray}" Margin="0,6,0,0" />
+
+            <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+                <ui:Button Content="Save" Appearance="Primary" Command="{Binding SaveCommand}" />
+                <ui:Button Content="Reset to defaults" Margin="8,0,0,0" Command="{Binding ResetCommand}" />
+                <TextBlock Text="{Binding SavedText}" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="Green" />
+            </StackPanel>
+            <TextBlock Text="{Binding ValidationText}" Margin="0,8,0,24" Foreground="IndianRed" TextWrapping="Wrap" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>
