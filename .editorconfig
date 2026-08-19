@@ -53,8 +53,11 @@ dotnet_naming_symbols.private_fields.applicable_accessibilities = private
 dotnet_naming_style.underscore_camel.capitalization = camel_case
 dotnet_naming_style.underscore_camel.required_prefix = _
 
-# Documentation: public types and members carry doc comments (SPEC §12).
-dotnet_diagnostic.CS1591.severity = none  # enabled per-project once XML docs are turned on
+# Documentation: public types and members carry doc comments (SPEC §12); enforced
+# by review, not the compiler. CS1573 is off because we deliberately document only
+# the parameters that need explaining rather than restating obvious ones.
+dotnet_diagnostic.CS1591.severity = none
+dotnet_diagnostic.CS1573.severity = none
 
 [tests/**.cs]
 # Test method names are sentences (Underscores_between_words) and self-documenting;
