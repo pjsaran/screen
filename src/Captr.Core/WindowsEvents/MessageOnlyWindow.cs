@@ -27,7 +27,7 @@ public sealed class MessageOnlyWindow : IDisposable
     // statically so the GC can never collect it out from under the OS.
     private static readonly WNDPROC StaticWindowProcedure = RouteMessage;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, MessageOnlyWindow> Instances = new();
-    private static int _classRegistered;
+    private static int ClassRegistered;
 
     private readonly Thread _thread;
     private readonly ManualResetEventSlim _windowReady = new();
@@ -79,7 +79,7 @@ public sealed class MessageOnlyWindow : IDisposable
     {
         try
         {
-            if (Interlocked.Exchange(ref _classRegistered, 1) == 0)
+            if (Interlocked.Exchange(ref ClassRegistered, 1) == 0)
             {
                 fixed (char* className = WindowClassName)
                 {
