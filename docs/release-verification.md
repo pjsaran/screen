@@ -3,7 +3,7 @@
 What must be true before a build ships, split into what CI/scripts prove
 automatically and what needs a human with real machines. Items marked ☐ are the
 deferred checks for environments this repository's development machine cannot
-provide (clean VMs, a real certificate, a real tenant, WebICE).
+provide (clean VMs, a real code-signing certificate, a real Microsoft 365 tenant).
 
 ## Automated (every release build)
 

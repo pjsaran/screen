@@ -27,9 +27,14 @@ public static class QualityPresets
             "Layout and large text only — small text will not be readable. Smallest files.", QuantizerStep: 3),
     ];
 
-    /// <summary>Per-encoder quantizer for each preset step. Lower = better quality.
-    /// The sharp-text values were chosen by the quality bake-off against dense
-    /// numeral content (docs/quality-baseline/), not guessed.</summary>
+    /// <summary>
+    /// Per-encoder quantizer for each preset step. Lower = better quality, bigger
+    /// files. These are STARTING POINTS, not sacred values: quality is a user
+    /// setting, and anyone who wants sharper small text moves up a preset, sets a
+    /// numeric override, or lowers the frame rate. HEVC tolerates a slightly
+    /// higher quantizer than H.264 for equivalent quality, which is why the two
+    /// tables differ.
+    /// </summary>
     private static readonly int[] HevcQp = [18, 23, 28, 34];
     private static readonly int[] H264Qp = [16, 21, 26, 32];
 
@@ -59,8 +64,8 @@ public static class QualityPresets
             case "h264_nvenc":
                 {
                     int qp = numericOverride ?? (encoderName == "hevc_nvenc" ? HevcQp[step] : H264Qp[step]);
-                    // p5 balances quality and speed; tune hq + spatial AQ protect thin
-                    // glyphs from being smoothed away (the bake-off's decisive settings).
+                    // p5 balances quality and speed; tune hq + spatial AQ spend bits
+                    // on the detailed regions, which is where screen text lives.
                     return ["-rc", "constqp", "-qp", Invariant(qp), "-preset", "p5", "-tune", "hq", "-spatial-aq", "1"];
                 }
 
