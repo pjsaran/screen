@@ -67,12 +67,18 @@ try {
     if ($Publish -or $Installer) {
         Write-Host '== 6/7 Publish (self-contained win-x64) =======================' -ForegroundColor Cyan
         $pubDir = Join-Path $RepoRoot 'publish'
+        if (Test-Path $pubDir) { Remove-Item $pubDir -Recurse -Force } # idempotent: no stale files
         # App first, then CLI into the SAME folder so the self-contained runtime is
         # shared once (SPEC §4: one install payload).
         dotnet publish (Join-Path $RepoRoot 'src\Captr.App\Captr.App.csproj') -c $Configuration -r win-x64 --self-contained -o $pubDir
         if ($LASTEXITCODE -ne 0) { throw 'Publish (App) failed.' }
         dotnet publish (Join-Path $RepoRoot 'src\Captr.Cli\Captr.Cli.csproj') -c $Configuration -r win-x64 --self-contained -o $pubDir
         if ($LASTEXITCODE -ne 0) { throw 'Publish (CLI) failed.' }
+
+        # The CLI ships as captr.exe but its ASSEMBLY is Captr.Cli (see the csproj
+        # comment: captr.dll would overwrite Captr.dll case-insensitively). Renaming
+        # only the apphost is safe - it locates Captr.Cli.dll by embedded name.
+        Move-Item (Join-Path $pubDir 'Captr.Cli.exe') (Join-Path $pubDir 'captr.exe') -Force
 
         # Bundle the encoder + its licence texts next to the app (SPEC §2).
         $ffDir = Join-Path $pubDir 'ffmpeg'

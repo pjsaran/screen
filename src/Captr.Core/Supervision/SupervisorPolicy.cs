@@ -14,6 +14,7 @@ public sealed class SupervisorPolicy
     private DateTimeOffset? _lastProgressUtc;
     private DateTimeOffset _lastGrowthUtc;
     private long _lastFileLength = -1;
+    private long _lastReportedTotalBytes;
     private DateTimeOffset? _slowSince;
     private bool _fellBack;
 
@@ -21,6 +22,7 @@ public sealed class SupervisorPolicy
     public void OnProgress(EncoderProgress progress)
     {
         _lastProgressUtc = progress.ObservedUtc;
+        _lastReportedTotalBytes = progress.TotalSizeBytes;
 
         if (progress.Speed is { } speed && speed < SupervisionConstants.SlowSpeedThreshold)
         {
@@ -68,13 +70,19 @@ public sealed class SupervisorPolicy
             return $"no progress for {(nowUtc - progressReference).TotalSeconds:F0}s";
         }
 
-        // File growth only counts once a segment exists and progress has started —
-        // before that, "not growing" is just "still starting up".
+        // File growth only counts as a stall when (a) a segment exists and progress
+        // started, (b) nothing reached the disk for the whole timeout, AND (c) the
+        // encoder ITSELF claims to have produced far more bytes than the disk shows.
+        // Gate (c) is what stops FFmpeg's 512 KB output buffering from masquerading
+        // as a stall on low-bitrate (static-screen) content — see the constant's
+        // remarks for how that false positive was found.
         if (_lastProgressUtc is not null
             && _lastFileLength >= 0
-            && nowUtc - _lastGrowthUtc > SupervisionConstants.FileGrowthTimeout)
+            && nowUtc - _lastGrowthUtc > SupervisionConstants.FileGrowthTimeout
+            && _lastReportedTotalBytes - _lastFileLength > SupervisionConstants.FileGrowthSlackBytes)
         {
-            return $"output file not growing for {(nowUtc - _lastGrowthUtc).TotalSeconds:F0}s";
+            return $"output file not growing for {(nowUtc - _lastGrowthUtc).TotalSeconds:F0}s " +
+                   $"while the encoder reports {(_lastReportedTotalBytes - _lastFileLength) / 1024} KB produced";
         }
 
         return null;

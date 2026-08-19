@@ -12,11 +12,12 @@ public class SupervisorPolicyTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 8, 19, 9, 0, 0, TimeSpan.Zero);
 
-    private static EncoderProgress ProgressAt(DateTimeOffset at, double? speed = 1.0) => new()
+    private static EncoderProgress ProgressAt(DateTimeOffset at, double? speed = 1.0, long totalBytes = 0) => new()
     {
         Frame = 1,
         ObservedUtc = at,
         Speed = speed,
+        TotalSizeBytes = totalBytes,
     };
 
     [Fact]
@@ -41,20 +42,39 @@ public class SupervisorPolicyTests
     }
 
     [Fact]
-    public void A_growing_output_file_is_healthy_but_a_frozen_one_is_a_stall()
+    public void A_frozen_file_with_the_encoder_far_ahead_is_a_stall()
     {
         var policy = new SupervisorPolicy();
         policy.OnProcessLaunched(T0);
 
-        // Progress keeps arriving, but the newest segment file stops growing.
-        for (int second = 1; second <= 20; second++)
+        // Progress keeps arriving and the encoder claims 50 MB produced, but the
+        // newest segment file never grows past 1000 bytes for the whole window.
+        for (int second = 1; second <= 130; second++)
         {
-            policy.OnProgress(ProgressAt(T0 + TimeSpan.FromSeconds(second)));
+            policy.OnProgress(ProgressAt(T0 + TimeSpan.FromSeconds(second), totalBytes: 50_000_000));
             policy.OnFileLength(1000, T0 + TimeSpan.FromSeconds(second));
         }
 
-        policy.DetectStall(T0 + TimeSpan.FromSeconds(20)).ShouldNotBeNull();
-        policy.DetectStall(T0 + TimeSpan.FromSeconds(20))!.ShouldContain("not growing");
+        policy.DetectStall(T0 + TimeSpan.FromSeconds(130)).ShouldNotBeNull();
+        policy.DetectStall(T0 + TimeSpan.FromSeconds(130))!.ShouldContain("not growing");
+    }
+
+    [Fact]
+    public void A_frozen_file_is_NOT_a_stall_while_the_bytes_fit_in_ffmpegs_output_buffer()
+    {
+        // The false positive that once looped healthy encoders to death: static
+        // screen content produces so few bytes that FFmpeg's 512 KB output buffer
+        // keeps the file at 0 for a long time. The encoder's own byte counter is
+        // the tiebreaker (see SupervisionConstants.FileGrowthSlackBytes).
+        var policy = new SupervisorPolicy();
+        policy.OnProcessLaunched(T0);
+        for (int second = 1; second <= 130; second++)
+        {
+            policy.OnProgress(ProgressAt(T0 + TimeSpan.FromSeconds(second), totalBytes: 300_000));
+            policy.OnFileLength(0, T0 + TimeSpan.FromSeconds(second));
+        }
+
+        policy.DetectStall(T0 + TimeSpan.FromSeconds(130)).ShouldBeNull();
     }
 
     [Fact]
@@ -62,13 +82,13 @@ public class SupervisorPolicyTests
     {
         var policy = new SupervisorPolicy();
         policy.OnProcessLaunched(T0);
-        for (int second = 1; second <= 30; second++)
+        for (int second = 1; second <= 130; second++)
         {
-            policy.OnProgress(ProgressAt(T0 + TimeSpan.FromSeconds(second)));
+            policy.OnProgress(ProgressAt(T0 + TimeSpan.FromSeconds(second), totalBytes: 50_000_000));
             policy.OnFileLength(1000 + second, T0 + TimeSpan.FromSeconds(second));
         }
 
-        policy.DetectStall(T0 + TimeSpan.FromSeconds(30)).ShouldBeNull();
+        policy.DetectStall(T0 + TimeSpan.FromSeconds(130)).ShouldBeNull();
     }
 
     [Fact]

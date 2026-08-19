@@ -1,7 +1,7 @@
 # Hosting
 
 The recording host's brain, UI-free (SPEC §4: "the host owns the recording…
-it runs fully without a UI"). `Captr.exe --host` is a thin shell around this folder.
+it runs fully without a UI"). `Captr.App.exe --host` is a thin shell around this folder.
 
 - **HostService** — implements the IPC operations: start (idempotent — starting
   while recording reports the existing session and succeeds, because schedulers

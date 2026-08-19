@@ -9,7 +9,11 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <AssemblyName>captr</AssemblyName>
+    <AssemblyName>Captr.Cli</AssemblyName>
+    <!-- The apphost is renamed to captr.exe at publish time (build.ps1): the managed
+         assembly must NOT be named 'captr' because Captr.dll and captr.dll are the
+         same file on Windows' case-insensitive filesystem and the CLI would
+         overwrite the WPF app's assembly in the shared install folder. -->
     <RootNamespace>Captr.Cli</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>

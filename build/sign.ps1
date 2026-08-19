@@ -14,7 +14,7 @@
     When CAPTR_SIGN_PFX is absent the script logs a PROMINENT warning and succeeds,
     so a developer without certificate access can always build (SPEC §11).
 
-    Signs: Captr.exe, captr.exe, and the bundled ffmpeg.exe/ffprobe.exe. Signing the
+    Signs: Captr.App.exe, captr.exe, and the bundled ffmpeg.exe/ffprobe.exe. Signing the
     encoder binaries modifies them — this is the documented, permitted modification
     of the otherwise bit-for-bit-unmodified FFmpeg build (SPEC §2), and it matters:
     an unsigned well-known-name exe spawned by a signed parent while capturing the
@@ -48,7 +48,7 @@ $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\si
 if (-not $signtool) { throw 'signtool.exe not found — install the Windows 10/11 SDK signing tools.' }
 
 $files = if (Test-Path $Target -PathType Container) {
-    Get-ChildItem $Target -Recurse -Include 'Captr.exe', 'captr.exe', 'ffmpeg.exe', 'ffprobe.exe' | Select-Object -ExpandProperty FullName
+    Get-ChildItem $Target -Recurse -Include 'Captr.App.exe', 'captr.exe', 'ffmpeg.exe', 'ffprobe.exe' | Select-Object -ExpandProperty FullName
 } else { @($Target) }
 
 foreach ($f in $files) {

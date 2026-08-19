@@ -17,11 +17,26 @@ public static class SupervisionConstants
 
     /// <summary>
     /// The newest segment file not growing for this long while progress claims to
-    /// advance ⇒ treated as a stall too (SPEC §6: "output file not growing while
-    /// nominally recording"). Catches the case where the encoder is alive but the
-    /// disk writes stopped (full disk driver stalls, vanished folder).
+    /// advance ⇒ treated as a stall (SPEC §6: "output file not growing while
+    /// nominally recording"). Catches an encoder that is alive while disk writes
+    /// stopped (vanished folder, wedged filesystem driver).
     /// </summary>
-    public static readonly TimeSpan FileGrowthTimeout = TimeSpan.FromSeconds(15);
+    /// <remarks>
+    /// MEASURED: FFmpeg writes segment output through a 512 KB IO buffer, so on
+    /// near-static screen content (tiny bitrate) a perfectly healthy segment file
+    /// legitimately stays at 0 bytes for tens of seconds. An earlier 15-second
+    /// timeout killed healthy encoders in an endless loop — found by the
+    /// post-install verification, not by unit tests. Hence the long timeout AND the
+    /// <see cref="FileGrowthSlackBytes"/> gate: a stall is only declared when
+    /// FFmpeg's own progress counter says far more bytes were produced than ever
+    /// reached the disk.
+    /// </remarks>
+    public static readonly TimeSpan FileGrowthTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>The muxer must claim at least this many bytes MORE than the disk
+    /// file shows before "not growing" counts — comfortably above the 512 KB write
+    /// chunk so buffering can never look like a stall.</summary>
+    public const long FileGrowthSlackBytes = 4L * 1024 * 1024;
 
     /// <summary>Grace period between asking FFmpeg to stop (the 'q' on stdin) and
     /// terminating it. Long enough to flush and close a segment cleanly; short

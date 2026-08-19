@@ -26,7 +26,7 @@ public static class FfmpegLocator
 
         throw new FileNotFoundException(
             $"{binaryName} was not found. In an installation it lives in the 'ffmpeg' folder " +
-            "beside Captr.exe; in a development tree run 'pwsh build/fetch-ffmpeg.ps1' once to " +
+            "beside Captr.App.exe; in a development tree run 'pwsh build/fetch-ffmpeg.ps1' once to " +
             "fetch the pinned, checksum-verified build into tools/ffmpeg/bin.");
     }
 

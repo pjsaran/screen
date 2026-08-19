@@ -27,7 +27,7 @@ public class CrossProcessHostTests
 
         dir.ShouldNotBeNull("could not locate the repo root from the test directory");
         string exe = Path.Combine(dir.FullName, "src", "Captr.App", "bin", configuration,
-            "net10.0-windows10.0.19041.0", "Captr.exe");
+            "net10.0-windows10.0.19041.0", "Captr.App.exe");
         File.Exists(exe).ShouldBeTrue($"host exe not built at {exe}");
         return exe;
     }
@@ -109,7 +109,7 @@ public class CrossProcessHostTests
     /// would shadow this test's.</summary>
     private static void KillStrayHosts()
     {
-        foreach (Process process in Process.GetProcessesByName("Captr"))
+        foreach (Process process in Process.GetProcessesByName("Captr.App"))
         {
             try
             {

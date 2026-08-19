@@ -14,7 +14,7 @@ UI / CLI ──► IpcClient ──► \\.\pipe\captr-host-<user-sid-hash> ─�
   handshake, dispatches requests to the host, answers unknown kinds with an error
   *response* (never a dropped connection — old clients must fail politely).
 - **IpcClient** — connects, performs the handshake, sends requests. Its
-  `EnsureHostRunningAsync` starts `Captr.exe --host` when no host answers — this
+  `EnsureHostRunningAsync` starts `Captr.App.exe --host` when no host answers — this
   is how "the host starts on demand" (SPEC §4) actually happens.
 
 Rules that matter:

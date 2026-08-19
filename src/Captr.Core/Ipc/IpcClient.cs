@@ -6,7 +6,7 @@ namespace Captr.Core.Ipc;
 /// <summary>
 /// The UI/CLI end of the pipe: connect, shake hands, exchange request/response.
 /// Owns "the host starts on demand" (SPEC §4): when no host answers,
-/// <see cref="ConnectAsync"/> can spawn <c>Captr.exe --host</c> detached and retry.
+/// <see cref="ConnectAsync"/> can spawn <c>Captr.App.exe --host</c> detached and retry.
 /// If this class fails, nothing can talk to the host — so every failure mode maps
 /// to a clear exception the CLI turns into a documented exit code.
 /// </summary>
@@ -30,7 +30,7 @@ public sealed class IpcClient : IAsyncDisposable
     /// <param name="startHostIfNeeded">True for operations that should summon a
     /// host (start, recover); false for pure queries where "no host" simply means
     /// "idle" (status when nothing is recording).</param>
-    /// <param name="hostExecutablePath">Path to Captr.exe; defaults to the one
+    /// <param name="hostExecutablePath">Path to Captr.App.exe; defaults to the one
     /// beside the current executable.</param>
     public static async Task<IpcClient?> ConnectAsync(
         string clientVersion, bool startHostIfNeeded, string? hostExecutablePath, CancellationToken cancellationToken)
@@ -97,11 +97,11 @@ public sealed class IpcClient : IAsyncDisposable
     private static void StartDetachedHost(string? hostExecutablePath)
     {
         string exePath = hostExecutablePath
-            ?? Path.Combine(AppContext.BaseDirectory, "Captr.exe");
+            ?? Path.Combine(AppContext.BaseDirectory, "Captr.App.exe");
         if (!File.Exists(exePath))
         {
             throw new HostUnreachableException(
-                $"Captr.exe was not found at {exePath}, so no recording host could be started.");
+                $"Captr.App.exe was not found at {exePath}, so no recording host could be started.");
         }
 
         // Detached: the host must survive this CLI process ending (SPEC §4).

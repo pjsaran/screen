@@ -268,12 +268,23 @@ public sealed class EncoderSupervisor
     {
         try
         {
-            return new DirectoryInfo(workingFolder)
-                .EnumerateFiles("seg-*.mkv")
-                .OrderByDescending(f => f.LastWriteTimeUtc)
-                .FirstOrDefault()?.Length ?? -1;
+            // Newest by NAME (they embed a timestamp): LastWriteTime is unreliable
+            // for a file another process holds open. So is FileInfo.Length — NTFS
+            // directory metadata lags for open files — hence the explicit open with
+            // full sharing to read the TRUE current length.
+            string? newest = Directory.EnumerateFiles(workingFolder, "seg-*.mkv")
+                .OrderDescending(StringComparer.Ordinal)
+                .FirstOrDefault();
+            if (newest is null)
+            {
+                return -1;
+            }
+
+            using var stream = new FileStream(
+                newest, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return stream.Length;
         }
-        catch (DirectoryNotFoundException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return -1;
         }

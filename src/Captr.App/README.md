@@ -2,8 +2,8 @@
 
 The single Windows executable, serving two roles (SPEC §4):
 
-- `Captr.exe` — the WPF desktop UI described below.
-- `Captr.exe --host` — the headless recording host (`HostEntryPoint` →
+- `Captr.App.exe` — the WPF desktop UI described below.
+- `Captr.App.exe --host` — the headless recording host (`HostEntryPoint` →
   `Captr.Core.Hosting`). See the warning in `HostEntryPoint.cs`; never a service.
 
 The UI is a **view** (SPEC §4): it holds no recording state, and can be closed,

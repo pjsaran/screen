@@ -10,7 +10,9 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
-    <AssemblyName>Captr</AssemblyName>
+    <AssemblyName>Captr.App</AssemblyName>
+    <!-- NOT 'Captr': the CLI ships beside us as captr.exe, and Captr.exe/captr.exe
+         are the SAME file on Windows' case-insensitive filesystem. -->
     <RootNamespace>Captr.App</RootNamespace>
     <!-- We supply our own Main (role switch) instead of WPF's generated one. -->
     <StartupObject>Captr.App.Program</StartupObject>
