@@ -21,3 +21,36 @@ DISPLAYCONFIG_TARGET_DEVICE_NAME
 
 // --- Per-monitor DPI ---
 GetDpiForMonitor
+
+// --- Message-only window for system events (SPEC §6 table) ---
+CreateWindowEx
+DestroyWindow
+DefWindowProc
+RegisterClass
+GetMessage
+TranslateMessage
+DispatchMessage
+PostQuitMessage
+PostMessage
+HWND_MESSAGE
+WM_POWERBROADCAST
+WM_WTSSESSION_CHANGE
+WM_DISPLAYCHANGE
+WM_DEVICECHANGE
+WM_TIMECHANGE
+WM_QUERYENDSESSION
+WM_ENDSESSION
+WM_CLOSE
+PBT_APMSUSPEND
+PBT_APMRESUMEAUTOMATIC
+PBT_APMRESUMESUSPEND
+
+// --- Session (lock/RDP) notifications ---
+WTSRegisterSessionNotification
+WTSUnRegisterSessionNotification
+NOTIFY_FOR_THIS_SESSION
+
+// --- Display-sleep prevention + shutdown blocking (SPEC §6) ---
+SetThreadExecutionState
+ShutdownBlockReasonCreate
+ShutdownBlockReasonDestroy

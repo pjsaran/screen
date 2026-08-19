@@ -28,6 +28,7 @@ namespace Captr.Core.Sessions;
 [JsonDerivedType(typeof(TopologyChanged), "topology-changed")]
 [JsonDerivedType(typeof(ClockJumped), "clock-jumped")]
 [JsonDerivedType(typeof(EncoderProcessLaunched), "encoder-process-launched")]
+[JsonDerivedType(typeof(SessionNote), "note")]
 [JsonDerivedType(typeof(SessionFinalized), "session-finalized")]
 public abstract record JournalEvent
 {
@@ -195,6 +196,17 @@ public sealed record EncoderProcessLaunched : JournalEvent
     public required int ProcessId { get; init; }
     public required DateTimeOffset ProcessStartTimeUtc { get; init; }
     public required string ImagePath { get; init; }
+}
+
+/// <summary>
+/// A noteworthy observation that affects interpretation but not coverage: the
+/// workstation locked or unlocked, a remote-desktop transition, UAC secure-desktop
+/// denials tolerated, and similar (SPEC §6's Windows-events table asks for several
+/// of these to be "recorded").
+/// </summary>
+public sealed record SessionNote : JournalEvent
+{
+    public required string Text { get; init; }
 }
 
 /// <summary>
