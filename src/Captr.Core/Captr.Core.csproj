@@ -1,0 +1,34 @@
+<!--
+  Captr.Core — everything that is not a window: display enumeration, FFmpeg argument
+  building, process supervision, session integrity, IPC, delivery, secrets, settings,
+  and the CLI command handlers. The WPF app and the console launcher are both thin
+  shells over this library, which is what makes the logic unit-testable.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Captr.Core</RootNamespace>
+    <!-- Public types carry doc comments (SPEC §12); the XML file also feeds IDE help. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- All P/Invoke is source-generated from Interop/NativeMethods.txt (SPEC §12:
+         "all platform invocation is source-generated, confined to one place"). -->
+    <PackageReference Include="Microsoft.Windows.CsWin32" PrivateAssets="all" />
+    <AdditionalFiles Include="Interop\NativeMethods.txt" />
+
+    <PackageReference Include="Vortice.DXGI" />
+    <PackageReference Include="Vortice.Direct3D11" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="Microsoft.Identity.Client" />
+    <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" />
+    <PackageReference Include="Microsoft.Graph" />
+    <PackageReference Include="System.IO.Hashing" />
+  </ItemGroup>
+
+</Project>

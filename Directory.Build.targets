@@ -1,0 +1,19 @@
+<!--
+  Stamps the git commit into the informational version (SPEC §11: "the informational
+  version should include the source commit"). Runs before GetAssemblyVersion so the
+  compiler sees it. If git is unavailable (e.g. a source tarball), the build still
+  succeeds and the version simply has no commit suffix.
+-->
+<Project>
+  <Target Name="CaptrSetSourceRevision" BeforeTargets="GetAssemblyVersion;GenerateNuspec"
+          Condition="'$(SourceRevisionId)' == ''">
+    <Exec Command="git rev-parse --short=12 HEAD"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_CaptrGitSha" />
+      <Output TaskParameter="ExitCode" PropertyName="_CaptrGitExit" />
+    </Exec>
+    <PropertyGroup Condition="'$(_CaptrGitExit)' == '0'">
+      <SourceRevisionId>$(_CaptrGitSha)</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
+</Project>

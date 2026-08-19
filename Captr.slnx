@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Captr.App/Captr.App.csproj" />
+    <Project Path="src/Captr.Cli/Captr.Cli.csproj" />
+    <Project Path="src/Captr.Core/Captr.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Captr.Core.Tests/Captr.Core.Tests.csproj" />
+    <Project Path="tests/Captr.Integration.Tests/Captr.Integration.Tests.csproj" />
+  </Folder>
+</Solution>

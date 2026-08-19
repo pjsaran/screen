@@ -1,0 +1,48 @@
+<!--
+  Shared build settings for every project in the solution (SPEC §12: "a single shared
+  properties file for common build settings"). If you are about to copy a property into
+  an individual .csproj, it probably belongs here instead.
+-->
+<Project>
+  <Import Project="$(MSBuildThisFileDirectory)Version.props" />
+
+  <PropertyGroup>
+    <!-- Windows-only application: we P/Invoke, capture the desktop, and ship WPF. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Platforms>AnyCPU</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- SPEC §12: nullable reference types on, and every warning is an error.
+         Do not suppress a warning without a comment justifying it. -->
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- Version flow: 0.1.0 -> 0.1.0.0 assembly/file version; the informational
+         version additionally carries the git commit (SourceRevisionId is set in
+         Directory.Build.targets). -->
+    <Version>$(CaptrVersion)</Version>
+    <AssemblyVersion>$(CaptrVersion).0</AssemblyVersion>
+    <FileVersion>$(CaptrVersion).0</FileVersion>
+    <IncludeSourceRevisionInInformationalVersion>true</IncludeSourceRevisionInInformationalVersion>
+
+    <Company>Captr</Company>
+    <Product>Captr</Product>
+    <NeutralLanguage>en</NeutralLanguage>
+
+    <!-- Deterministic, self-contained-friendly output. -->
+    <Deterministic>true</Deterministic>
+    <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- BannedApiAnalyzers reads this file; it is how we mechanically forbid
+         sync-over-async and plaintext secret APIs (SPEC §12). -->
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" />
+  </ItemGroup>
+</Project>

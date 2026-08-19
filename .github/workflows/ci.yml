@@ -1,0 +1,57 @@
+# CI for Captr (SPEC §11): formatting check, warnings-as-errors build, tests,
+# licence gate, and packaging. Signing is skipped automatically when the signing
+# environment variables are absent (SPEC §11: the build must succeed unsigned).
+#
+# Only CI-safe test categories run here: unit tests plus integration tests that use
+# lavfi synthetic inputs. Tests needing a real desktop (ddagrab), a GPU encoder, or
+# long soak time carry traits Display/Gpu/Soak and run on a real machine via
+# build/build.ps1 -Full.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore dotnet tools (nuget-license)
+        run: dotnet tool restore
+
+      - name: Fetch pinned FFmpeg (checksum-verified)
+        run: pwsh build/fetch-ffmpeg.ps1
+
+      - name: Licence gate (SPEC §2 — fails on disallowed or drifted report)
+        run: pwsh build/check-licenses.ps1
+
+      - name: Verify formatting
+        run: dotnet format Captr.slnx --verify-no-changes
+
+      - name: Build (warnings are errors)
+        run: dotnet build Captr.slnx --configuration Release
+
+      - name: Unit tests
+        run: dotnet test tests/Captr.Core.Tests --configuration Release --no-build
+
+      - name: Integration tests (CI-safe categories only)
+        run: >
+          dotnet test tests/Captr.Integration.Tests --configuration Release --no-build
+          --filter "Category=Ffmpeg"
+
+      - name: Package (publish + installer, unsigned unless secrets present)
+        run: pwsh build/build.ps1 -Configuration Release -SkipTests -Installer
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: captr-package
+          path: |
+            artifacts/**

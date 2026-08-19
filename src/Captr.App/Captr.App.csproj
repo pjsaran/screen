@@ -1,0 +1,30 @@
+<!--
+  Captr.App — the single Windows executable "Captr.exe" serving two roles (SPEC §4):
+  run bare it is the WPF desktop UI (a pure *view* of the host's state); run with the
+  host switch it is the headless recording host (no window, owns all recording).
+  One assembly, one signature, one install payload. Program.cs performs the role switch.
+  (XML comments cannot contain a double hyphen, hence "the host switch" above.)
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Captr</AssemblyName>
+    <RootNamespace>Captr.App</RootNamespace>
+    <!-- We supply our own Main (role switch) instead of WPF's generated one. -->
+    <StartupObject>Captr.App.Program</StartupObject>
+    <!-- Per-monitor-v2 DPI awareness (SPEC §6, DPI row). -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Captr.Core\Captr.Core.csproj" />
+    <PackageReference Include="WPF-UI" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="H.NotifyIcon.Wpf" />
+    <PackageReference Include="Serilog.Extensions.Hosting" />
+  </ItemGroup>
+
+</Project>

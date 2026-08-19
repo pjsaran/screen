@@ -1,0 +1,27 @@
+<!--
+  Integration tests: real FFmpeg (fetched by build/fetch-ffmpeg.ps1 — the collection
+  fixture fails fast with instructions if it is missing), real IPC, real disk.
+
+  Tests are grouped by xunit trait "Category" so environments run what they can:
+    Ffmpeg   needs the fetched ffmpeg.exe, but no display or GPU (lavfi inputs) — CI-safe
+    Display  needs a real interactive desktop (ddagrab capture)  — local machine only
+    Gpu      needs real hardware encoders (NVENC/AMF/QSV)        — local machine only
+    Chaos    destructive scenarios (kills, disk fill, corruption)
+    Soak     long-running; duration set via CAPTR_SOAK_HOURS
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Captr.Integration.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Captr.Core\Captr.Core.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Shouldly" />
+  </ItemGroup>
+
+</Project>

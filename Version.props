@@ -1,0 +1,13 @@
+<!--
+  THE single source of the application version (SPEC §11: "the version defined in
+  exactly one place"). Everything else flows from here:
+    - assembly / file / informational versions  (Directory.Build.props)
+    - the installer version                     (build/make-installer.ps1 generates version.iss)
+    - the UI About page                         (reads AssemblyInformationalVersion)
+  Never write a version number anywhere else.
+-->
+<Project>
+  <PropertyGroup>
+    <CaptrVersion>0.1.0</CaptrVersion>
+  </PropertyGroup>
+</Project>

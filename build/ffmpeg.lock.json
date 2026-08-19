@@ -1,0 +1,20 @@
+{
+  "//": [
+    "Pin for the bundled FFmpeg build (SPEC §2/§11: fetch a pinned LGPL encoder build,",
+    "verify against a committed checksum, record the exact upstream build identifier).",
+    "The build MUST be an -lgpl variant: GPL builds carry libx264 and redistribution",
+    "obligations SPEC §2 exists to avoid. Never pin the rolling 'latest' tag.",
+    "To upgrade: pick a dated autobuild tag from github.com/BtbN/FFmpeg-Builds/releases,",
+    "copy the asset's line from its checksums.sha256, update this file, and re-run",
+    "build/fetch-ffmpeg.ps1 — it fails hard on any mismatch."
+  ],
+  "repository": "BtbN/FFmpeg-Builds",
+  "releaseTag": "autobuild-2026-08-18-15-03",
+  "assetName": "ffmpeg-n8.1.2-44-g7c533d0f86-win64-lgpl-8.1.zip",
+  "sha256": "94df4ac3bbe6b104c7fbcfd8bfa3a0195bf52c23045f5e9b982f436e8b18256d",
+  "buildId": "ffmpeg-n8.1.2-44-g7c533d0f86-win64-lgpl",
+  "requiredFilters": ["ddagrab", "hwdownload", "pad", "hstack", "xstack", "drawtext"],
+  "requiredEncoders": ["hevc_nvenc", "h264_nvenc", "hevc_qsv", "h264_qsv", "hevc_amf", "h264_amf"],
+  "optionalEncoders": ["libopenh264"],
+  "requiredMuxers": ["segment", "matroska"]
+}

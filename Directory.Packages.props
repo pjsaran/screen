@@ -1,0 +1,51 @@
+<!--
+  Central package version management (SPEC §12: "no version numbers duplicated across
+  project files"). Every PackageReference in a .csproj takes its version from here.
+
+  LICENSING (SPEC §2): every package listed must be MIT, Apache-2.0, BSD-2/3-Clause,
+  MS-PL, ISC, Unlicense, or public domain. build/check-licenses.ps1 verifies this
+  mechanically, including transitive dependencies, and fails the build otherwise.
+  Known trap this gate exists to catch: FluentAssertions >= 8 moved to a paid Xceed
+  licence — we deliberately use plain xunit asserts / Shouldly (BSD) instead.
+-->
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Application -->
+    <PackageVersion Include="WPF-UI" Version="4.3.0" />                                <!-- MIT -->
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />                 <!-- MIT -->
+    <PackageVersion Include="H.NotifyIcon.Wpf" Version="2.4.1" />                      <!-- MIT -->
+    <PackageVersion Include="Microsoft.Windows.CsWin32" Version="0.3.321" />           <!-- MIT -->
+    <PackageVersion Include="Vortice.DXGI" Version="3.8.3" />                          <!-- MIT -->
+    <PackageVersion Include="Vortice.Direct3D11" Version="3.8.3" />                    <!-- MIT -->
+    <PackageVersion Include="Serilog" Version="4.4.0" />                               <!-- Apache-2.0 -->
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />                    <!-- Apache-2.0 -->
+    <PackageVersion Include="Serilog.Extensions.Hosting" Version="10.0.0" />           <!-- Apache-2.0 -->
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.11" />        <!-- MIT -->
+    <PackageVersion Include="System.CommandLine" Version="2.0.11" />                   <!-- MIT -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.11" />               <!-- MIT -->
+    <PackageVersion Include="Microsoft.Identity.Client" Version="4.87.0" />            <!-- MIT -->
+    <PackageVersion Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.87.0" /> <!-- MIT -->
+    <PackageVersion Include="Microsoft.Graph" Version="6.5.0" />                       <!-- MIT -->
+    <PackageVersion Include="System.IO.Hashing" Version="10.0.11" />                   <!-- MIT -->
+
+    <!-- Tests -->
+    <PackageVersion Include="xunit.v3" Version="4.0.0" />                              <!-- Apache-2.0 -->
+    <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.0" />             <!-- Apache-2.0 -->
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />               <!-- MIT -->
+    <PackageVersion Include="NSubstitute" Version="6.2.0" />                           <!-- BSD-3-Clause -->
+    <PackageVersion Include="Shouldly" Version="4.3.0" />                              <!-- BSD-3-Clause -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Analyzers applied to every project. VSTHRD* rules ban sync-over-async and
+         enforce CancellationToken flow (SPEC §12); BannedApiAnalyzers enforces
+         BannedSymbols.txt at the repo root. -->
+    <GlobalPackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.7.23" />
+    <GlobalPackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
+  </ItemGroup>
+</Project>

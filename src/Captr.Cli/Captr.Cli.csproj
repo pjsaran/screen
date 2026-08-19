@@ -1,0 +1,21 @@
+<!--
+  Captr.Cli — the console launcher "captr.exe" (SPEC §4 permits "a small launcher or
+  the same executable under a second name"; we use a separate tiny console exe because
+  a WinExe cannot serve stdout/stderr/exit codes to a console or Task Scheduler).
+  It contains only Program.cs — every command's real logic lives in Captr.Core so it
+  is unit-testable and shared with the UI.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>captr</AssemblyName>
+    <RootNamespace>Captr.Cli</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Captr.Core\Captr.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,17 @@
+# Symbols forbidden across the solution, enforced by Microsoft.CodeAnalysis.BannedApiAnalyzers.
+# Format: {kind}:{documentation-comment-id}; message  (blank separator lines are not allowed)
+#
+# SPEC §12: "No synchronous blocking on asynchronous work outside the entry point."
+# The VSTHRD analyzers catch most of it; these entries make the core cases hard errors.
+P:System.Threading.Tasks.Task`1.Result; Blocks a thread on async work and can deadlock. Await the task instead.
+M:System.Threading.Tasks.Task.Wait; Blocks a thread on async work and can deadlock. Await the task instead.
+M:System.Threading.Tasks.Task.Wait(System.Int32); Blocks a thread on async work. Await the task instead.
+M:System.Threading.Tasks.Task.Wait(System.Threading.CancellationToken); Blocks a thread on async work. Await the task instead.
+M:System.Threading.Tasks.Task.WaitAll(System.Threading.Tasks.Task[]); Blocks a thread on async work. Await Task.WhenAll instead.
+M:System.Threading.Tasks.Task.WaitAny(System.Threading.Tasks.Task[]); Blocks a thread on async work. Await Task.WhenAny instead.
+# SPEC §7: secrets are never held as plain strings. Use CredentialVault's SecretHandle
+# (byte arrays zeroed in finally blocks). These APIs create immortal plaintext copies.
+M:System.Runtime.InteropServices.Marshal.SecureStringToBSTR(System.Security.SecureString); Converts a secret to an unmanaged plaintext copy outside CredentialVault. Secret handling is confined to Captr.Core.Secrets.
+P:System.Net.NetworkCredential.Password; Exposes a stored secret as an immortal managed string. Secret handling is confined to Captr.Core.Secrets.
+# SPEC §12: timestamps are stored as UTC and converted only for display.
+P:System.DateTime.Now; Store timestamps in UTC (DateTime.UtcNow / DateTimeOffset.UtcNow) and convert only at the presentation layer.
