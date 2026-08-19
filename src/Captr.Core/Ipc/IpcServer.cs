@@ -17,14 +17,18 @@ public sealed class IpcServer : IAsyncDisposable
 {
     private readonly IHostOperations _operations;
     private readonly string _hostVersion;
+    private readonly string? _instanceSuffix;
     private readonly ILogger _log;
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _acceptLoop;
 
-    public IpcServer(IHostOperations operations, string hostVersion, ILogger log)
+    /// <param name="instanceSuffix">Test seam — see
+    /// <see cref="IpcProtocol.PipeName(string?)"/>. Production passes null.</param>
+    public IpcServer(IHostOperations operations, string hostVersion, ILogger log, string? instanceSuffix = null)
     {
         _operations = operations;
         _hostVersion = hostVersion;
+        _instanceSuffix = instanceSuffix;
         _log = log.ForContext<IpcServer>();
     }
 
@@ -33,7 +37,7 @@ public sealed class IpcServer : IAsyncDisposable
 
     private async Task AcceptLoopAsync(CancellationToken cancellationToken)
     {
-        string pipeName = IpcProtocol.PipeName();
+        string pipeName = IpcProtocol.PipeName(_instanceSuffix);
         while (!cancellationToken.IsCancellationRequested)
         {
             NamedPipeServerStream pipe = CreateSecuredPipe(pipeName);

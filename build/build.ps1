@@ -59,7 +59,13 @@ try {
         dotnet test (Join-Path $RepoRoot 'tests\Captr.Core.Tests') --configuration $Configuration --no-build
         if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed.' }
 
-        $filter = if ($Full) { "$TestFilter|Category=Display|Category=Gpu" } else { $TestFilter }
+        # Chaos is CI-safe (all lavfi-based) so it always runs; Display/Gpu need a
+        # real desktop and GPU, and Soak needs patience — both only with -Full.
+        $filter = if ($Full) {
+            "$TestFilter|Category=Chaos|Category=Display|Category=Gpu|Category=Soak"
+        } else {
+            "$TestFilter|Category=Chaos"
+        }
         dotnet test (Join-Path $RepoRoot 'tests\Captr.Integration.Tests') --configuration $Configuration --no-build --filter $filter
         if ($LASTEXITCODE -ne 0) { throw 'Integration tests failed.' }
     }

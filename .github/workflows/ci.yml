@@ -46,6 +46,11 @@ jobs:
           dotnet test tests/Captr.Integration.Tests --configuration Release --no-build
           --filter "Category=Ffmpeg"
 
+      - name: Chaos tests (kills, corruption, vanished folder — all lavfi-based)
+        run: >
+          dotnet test tests/Captr.Integration.Tests --configuration Release --no-build
+          --filter "Category=Chaos"
+
       - name: Package (publish + installer, unsigned unless secrets present)
         run: pwsh build/build.ps1 -Configuration Release -SkipTests -Installer
 

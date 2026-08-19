@@ -11,15 +11,21 @@ namespace Captr.Integration.Tests.Supervision;
 /// </summary>
 public sealed class SupervisionTestSession : IDisposable
 {
-    public string WorkingFolder { get; } =
-        Directory.CreateTempSubdirectory("captr-supervision-").FullName;
+    public string WorkingFolder { get; }
 
     public string FfmpegPath { get; }
 
     public SessionJournal Journal { get; }
 
-    public SupervisionTestSession()
+    /// <param name="parentFolder">When given, the session folder is created inside
+    /// it — lets recovery-scan tests point the scanner at the parent.</param>
+    public SupervisionTestSession(string? parentFolder = null)
     {
+        WorkingFolder = parentFolder is null
+            ? Directory.CreateTempSubdirectory("captr-supervision-").FullName
+            : Directory.CreateDirectory(
+                Path.Combine(parentFolder, "session-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+
         try
         {
             FfmpegPath = FfmpegLocator.FindFfmpeg();

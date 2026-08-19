@@ -87,11 +87,27 @@ public sealed class SessionJournal : IDisposable
     {
         var events = new List<JournalEvent>();
 
-        // FileShare.ReadWrite: the writing host holds the file open; readers
-        // (status queries, recovery scans of *other* sessions) must not be locked out.
-        using var stream = new FileStream(
-            journalPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(stream, Encoding.UTF8);
+        // Full sharing: the writing host holds the file open; readers (status
+        // queries, recovery scans) must never be locked out. External scanners
+        // (antivirus, indexers) can still hold it exclusively for an instant, so a
+        // brief retry beats surfacing a transient IOException to a status query.
+        FileStream? stream = null;
+        for (int attempt = 0; stream is null; attempt++)
+        {
+            try
+            {
+                stream = new FileStream(
+                    journalPath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+            }
+            catch (IOException) when (attempt < 5 && File.Exists(journalPath))
+            {
+                Thread.Sleep(30);
+            }
+        }
+
+        using FileStream journalStream = stream;
+        using var reader = new StreamReader(journalStream, Encoding.UTF8);
 
         while (reader.ReadLine() is { } line)
         {

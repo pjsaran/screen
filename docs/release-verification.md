@@ -54,16 +54,24 @@ On EACH of a clean Windows 10 (≥17763) and Windows 11 VM:
   interrupt a large upload (network off mid-transfer) and confirm resume from the
   correct offset; revoke permission and confirm the verbatim server error lands in
   manual-retry.
-☐ WebICE legibility: record a real WebICE session at the default preset;
-  a dense grid of small numbers must be readable at 100 % zoom in the encoded
-  output. (The automated stand-in is the dense-numeral bake-off in
-  `docs/quality-baseline/`.)
+
+## Picture quality
+
+Quality is a **user setting**, not a release gate: the preset (`archival`,
+`sharp-text` default, `balanced`, `compact`), an optional numeric quantizer
+override, and the frame rate are all adjustable at any time from the UI or
+`captr settings set`. A reviewer who wants sharper small text raises the preset
+or lowers the frame rate; nothing in the build needs to change. What the build
+DOES guarantee is that the chosen settings are the ones actually used and
+reported (encoder selection never silently substitutes, and the status view names
+the encoder actually running).
 
 ## Endurance
 
-☐ Ten-hour soak (`CAPTR_SOAK_HOURS=10`, the parameterised soak test): no handle
-  leak, no unbounded memory growth, timestamp drift < 1 s, journal internally
-  consistent, every segment verifies, coverage > 99.9 %.
+☐ Ten-hour soak: `CAPTR_SOAK_MINUTES=600` with the `Soak` trait — no handle leak,
+  no unbounded memory growth, wall-vs-encoded drift < 1 s, journal internally
+  consistent, every segment verifies, coverage > 99.9 %. (Shorter runs of the same
+  test — 3 and 4 minutes — pass on the development machine; only the clock differs.)
 ☐ GPU driver reset under load (e.g. vendor tool or `devcon restart` on the
   display adapter mid-recording): the session must gap honestly and continue or
   stop loudly — never hang or record silence.

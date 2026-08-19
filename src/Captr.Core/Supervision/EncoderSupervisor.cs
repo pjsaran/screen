@@ -208,7 +208,11 @@ public sealed class EncoderSupervisor
 
                 // A pending gap (from a previous restart) closes at the first
                 // progress of the new process — journal its honest duration.
-                if (getPendingGapStart() is { } gapStart)
+                // The observation must POST-DATE the gap: right after a relaunch,
+                // _latestProgress still holds the dead process's final snapshot,
+                // and closing against it once produced negative gap durations
+                // (coverage over 100% — caught by the chaos suite).
+                if (getPendingGapStart() is { } gapStart && progress.ObservedUtc > gapStart)
                 {
                     _journal.Append(new GapRecorded
                     {

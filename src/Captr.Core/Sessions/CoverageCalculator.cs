@@ -96,15 +96,19 @@ public static class CoverageCalculator
         return end < sessionStart ? lastEvent : end;
     }
 
-    /// <summary>Total gap time, never exceeding the session span even if overlapping
-    /// or over-reported gaps were journaled (honesty also means not reporting
-    /// negative coverage).</summary>
+    /// <summary>Total gap time, clamped to [0, span]: over-reported gaps cannot make
+    /// coverage negative, and a malformed NEGATIVE gap duration cannot inflate
+    /// coverage past 100% (honesty cuts both ways — a recording must never look
+    /// MORE complete than it is).</summary>
     private static TimeSpan ClampToSpan(List<CoverageGap> gaps, TimeSpan totalSpan)
     {
         TimeSpan sum = TimeSpan.Zero;
         foreach (CoverageGap gap in gaps)
         {
-            sum += gap.Duration;
+            if (gap.Duration > TimeSpan.Zero)
+            {
+                sum += gap.Duration;
+            }
         }
 
         return sum > totalSpan ? totalSpan : sum;

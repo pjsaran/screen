@@ -28,13 +28,21 @@ public static class IpcProtocol
     /// <summary>The pipe name for the current user. The SID hash keeps one user's
     /// host separate from another's on shared machines; the security descriptor
     /// (see IpcServer) does the actual enforcement.</summary>
-    public static string PipeName()
+    /// <param name="instanceSuffix">
+    /// Test seam. Production passes nothing, so every UI and CLI on this account
+    /// finds the one real host. Tests pass a unique value so their in-process
+    /// server gets a PRIVATE pipe — without it, a Captr host installed on the
+    /// developer's machine shadows the test server and the tests silently talk to
+    /// the real product instead (which is exactly how this seam came to exist).
+    /// </param>
+    public static string PipeName(string? instanceSuffix = null)
     {
         using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
         string sid = identity.User?.Value ?? "unknown";
         // A short stable hash keeps the name well under the pipe-name length cap.
         byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sid));
-        return "captr-host-" + Convert.ToHexStringLower(hash)[..16];
+        string name = "captr-host-" + Convert.ToHexStringLower(hash)[..16];
+        return instanceSuffix is null ? name : name + "-" + instanceSuffix;
     }
 
     /// <summary>Writes one envelope: 4-byte little-endian length + UTF-8 JSON.</summary>

@@ -16,21 +16,28 @@ namespace Captr.Core.Tests.Ipc;
 public class IpcRoundTripTests : IAsyncLifetime
 {
     private readonly IHostOperations _operations = Substitute.For<IHostOperations>();
+
+    /// <summary>A private pipe per test class. Without it, a Captr host actually
+    /// installed on the developer's machine owns the real per-user pipe and these
+    /// tests silently exercise the REAL product instead of the fake host.</summary>
+    private readonly string _pipeSuffix = "test-" + Guid.NewGuid().ToString("N")[..8];
+
     private IpcServer _server = null!;
 
     public ValueTask InitializeAsync()
     {
         _operations.GetStatusAsync(Arg.Any<CancellationToken>())
             .Returns(new StatusResponse("idle", null, null, null, null, null, null, null, null));
-        _server = new IpcServer(_operations, "1.2.3-test", Logger.None);
+        _server = new IpcServer(_operations, "1.2.3-test", Logger.None, _pipeSuffix);
         _server.Start();
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync() => await _server.DisposeAsync();
 
-    private static Task<IpcClient?> ConnectAsync() =>
-        IpcClient.ConnectAsync("test-client", startHostIfNeeded: false, null, TestContext.Current.CancellationToken);
+    private Task<IpcClient?> ConnectAsync() =>
+        IpcClient.ConnectAsync(
+            "test-client", startHostIfNeeded: false, null, TestContext.Current.CancellationToken, _pipeSuffix);
 
     [Fact]
     public async Task A_status_request_round_trips_with_a_typed_response()
@@ -65,7 +72,8 @@ public class IpcRoundTripTests : IAsyncLifetime
     {
         // Hand-rolled hello with a wrong version — simulating a stale client.
         var pipe = new System.IO.Pipes.NamedPipeClientStream(
-            ".", IpcProtocol.PipeName(), System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
+            ".", IpcProtocol.PipeName(_pipeSuffix),
+            System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
         await using (pipe.ConfigureAwait(false))
         {
             await pipe.ConnectAsync(TestContext.Current.CancellationToken);
@@ -107,7 +115,7 @@ public class IpcRoundTripTests : IAsyncLifetime
         await Task.Delay(200, TestContext.Current.CancellationToken);
 
         IpcClient? client = await IpcClient.ConnectAsync(
-            "test", startHostIfNeeded: false, null, TestContext.Current.CancellationToken);
+            "test", startHostIfNeeded: false, null, TestContext.Current.CancellationToken, _pipeSuffix);
 
         client.ShouldBeNull();
     }

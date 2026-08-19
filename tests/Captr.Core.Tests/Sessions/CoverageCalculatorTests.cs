@@ -149,6 +149,25 @@ public class CoverageCalculatorTests
     }
 
     [Fact]
+    public void A_negative_gap_duration_can_never_inflate_coverage_past_100_percent()
+    {
+        // A malformed gap (negative duration) once pushed coverage to 110% — a
+        // recording must never look MORE complete than it is.
+        var malformed = new GapRecorded
+        {
+            TimestampUtc = T0 + TimeSpan.FromMinutes(1),
+            GapStartUtc = T0 + TimeSpan.FromMinutes(1),
+            Duration = TimeSpan.FromSeconds(-30),
+            Reason = "stale close",
+        };
+
+        var report = CoverageCalculator.Compute([Start(), malformed, FinalizedAt(TimeSpan.FromMinutes(10))]);
+
+        report.Coverage.ShouldBeLessThanOrEqualTo(1.0);
+        report.RecordedSpan.ShouldBe(TimeSpan.FromMinutes(10));
+    }
+
+    [Fact]
     public void A_zero_length_session_counts_as_fully_covered()
     {
         var report = CoverageCalculator.Compute([Start(), FinalizedAt(TimeSpan.Zero)]);

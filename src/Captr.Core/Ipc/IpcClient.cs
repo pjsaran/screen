@@ -32,10 +32,13 @@ public sealed class IpcClient : IAsyncDisposable
     /// "idle" (status when nothing is recording).</param>
     /// <param name="hostExecutablePath">Path to Captr.App.exe; defaults to the one
     /// beside the current executable.</param>
+    /// <param name="instanceSuffix">Test seam — see
+    /// <see cref="IpcProtocol.PipeName(string?)"/>. Production passes null.</param>
     public static async Task<IpcClient?> ConnectAsync(
-        string clientVersion, bool startHostIfNeeded, string? hostExecutablePath, CancellationToken cancellationToken)
+        string clientVersion, bool startHostIfNeeded, string? hostExecutablePath,
+        CancellationToken cancellationToken, string? instanceSuffix = null)
     {
-        IpcClient? client = await TryConnectOnceAsync(clientVersion, cancellationToken).ConfigureAwait(false);
+        IpcClient? client = await TryConnectOnceAsync(clientVersion, instanceSuffix, cancellationToken).ConfigureAwait(false);
         if (client is not null || !startHostIfNeeded)
         {
             return client;
@@ -48,7 +51,7 @@ public sealed class IpcClient : IAsyncDisposable
         while (DateTimeOffset.UtcNow < deadline)
         {
             await Task.Delay(TimeSpan.FromMilliseconds(300), cancellationToken).ConfigureAwait(false);
-            client = await TryConnectOnceAsync(clientVersion, cancellationToken).ConfigureAwait(false);
+            client = await TryConnectOnceAsync(clientVersion, instanceSuffix, cancellationToken).ConfigureAwait(false);
             if (client is not null)
             {
                 return client;
@@ -60,9 +63,11 @@ public sealed class IpcClient : IAsyncDisposable
             $"{HostStartupTimeout.TotalSeconds:F0} seconds. Check the host log in %LOCALAPPDATA%\\Captr\\logs.");
     }
 
-    private static async Task<IpcClient?> TryConnectOnceAsync(string clientVersion, CancellationToken cancellationToken)
+    private static async Task<IpcClient?> TryConnectOnceAsync(
+        string clientVersion, string? instanceSuffix, CancellationToken cancellationToken)
     {
-        var pipe = new NamedPipeClientStream(".", IpcProtocol.PipeName(), PipeDirection.InOut, PipeOptions.Asynchronous);
+        var pipe = new NamedPipeClientStream(
+            ".", IpcProtocol.PipeName(instanceSuffix), PipeDirection.InOut, PipeOptions.Asynchronous);
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
