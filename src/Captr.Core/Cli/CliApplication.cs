@@ -54,6 +54,8 @@ public static class CliApplication
         root.Subcommands.Add(BuildRecordings(jsonOption));
         root.Subcommands.Add(BuildRecover(jsonOption));
         root.Subcommands.Add(BuildSettings(jsonOption));
+        root.Subcommands.Add(BuildDelivery(jsonOption));
+        root.Subcommands.Add(BuildAuth());
 
         return await root.Parse(args).InvokeAsync();
     }
@@ -260,6 +262,139 @@ public static class CliApplication
         command.Subcommands.Add(import);
 
         return command;
+    }
+
+    // ---- delivery ---------------------------------------------------------------
+
+    private static Command BuildDelivery(Option<bool> jsonOption)
+    {
+        var command = new Command("delivery", "Inspect and retry transfers to destinations.");
+
+        var list = new Command("list", "Every pending, failed, and completed transfer with attempts and the server's error.");
+        list.Options.Add(jsonOption);
+        list.SetAction(async (parseResult, cancellationToken) =>
+        {
+            bool json = parseResult.GetValue(jsonOption);
+            return await WithHostAsync(startHostIfNeeded: true, json, async client =>
+            {
+                ListDeliveriesResponse response = await client.RequestAsync<ListDeliveriesResponse>(
+                    IpcKinds.ListDeliveries, null, cancellationToken);
+                string human = response.Deliveries.Count == 0
+                    ? "No deliveries."
+                    : string.Join(Environment.NewLine, response.Deliveries.Select(d =>
+                        $"#{d.Id}  {d.State,-12} attempts:{d.Attempts}  {Path.GetFileName(d.OutputPath)} → {d.DestinationName}" +
+                        (d.LastError is null ? string.Empty : Environment.NewLine + $"      server said: {d.LastError}")));
+                Emit(json, response, human);
+                return ExitCodes.Success;
+            }, cancellationToken);
+        });
+        command.Subcommands.Add(list);
+
+        var idArgument = new Argument<long>("id") { Description = "The delivery id from 'captr delivery list'." };
+        var retry = new Command("retry", "Put a failed transfer back in the queue.");
+        retry.Arguments.Add(idArgument);
+        retry.Options.Add(jsonOption);
+        retry.SetAction(async (parseResult, cancellationToken) =>
+        {
+            bool json = parseResult.GetValue(jsonOption);
+            return await WithHostAsync(startHostIfNeeded: true, json, async client =>
+            {
+                StateResponse response = await client.RequestAsync<StateResponse>(
+                    IpcKinds.RetryDelivery, new RetryDeliveryRequest(parseResult.GetValue(idArgument)), cancellationToken);
+                Emit(json, response, response.Message);
+                return ExitCodes.Success;
+            }, cancellationToken);
+        });
+        command.Subcommands.Add(retry);
+
+        return command;
+    }
+
+    // ---- auth -------------------------------------------------------------------
+
+    private static Command BuildAuth()
+    {
+        var command = new Command("auth", "Provision destination credentials (stored in Windows Credential Manager).");
+        var nameArgument = new Argument<string>("name") { Description = "Credential name, referenced by a destination's credentialName setting." };
+
+        var set = new Command("set-secret",
+            "Store a secret. Reads from stdin when piped, otherwise prompts with masked input. " +
+            "NEVER pass secrets as arguments — command lines are visible to every process (SPEC §7).");
+        set.Arguments.Add(nameArgument);
+        set.SetAction(async (parseResult, cancellationToken) =>
+        {
+            string name = parseResult.GetValue(nameArgument)!;
+            byte[] secret = Console.IsInputRedirected
+                ? System.Text.Encoding.UTF8.GetBytes((await Console.In.ReadToEndAsync(cancellationToken)).TrimEnd('\r', '\n'))
+                : ReadMasked($"Secret for '{name}': ");
+            if (secret.Length == 0)
+            {
+                await Console.Error.WriteLineAsync("No secret provided; nothing stored.");
+                return ExitCodes.Error;
+            }
+
+            Captr.Core.Secrets.CredentialVault.Store(name, secret); // Store() wipes the buffer.
+            // Write-only confirmation (SPEC §7): stored + when, never the value.
+            await Console.Out.WriteLineAsync($"Secret '{name}' stored at {DateTimeOffset.UtcNow.LocalDateTime:yyyy-MM-dd HH:mm}.");
+            return ExitCodes.Success;
+        });
+        command.Subcommands.Add(set);
+
+        var status = new Command("status", "Show whether a secret is stored (never the secret itself).");
+        status.Arguments.Add(nameArgument);
+        status.SetAction(async (parseResult, cancellationToken) =>
+        {
+            string name = parseResult.GetValue(nameArgument)!;
+            bool exists = Captr.Core.Secrets.CredentialVault.Exists(name);
+            await Console.Out.WriteLineAsync(exists
+                ? $"A secret named '{name}' is stored."
+                : $"No secret named '{name}' is stored.");
+            return exists ? ExitCodes.Success : ExitCodes.Error;
+        });
+        command.Subcommands.Add(status);
+
+        var delete = new Command("delete", "Remove a stored secret.");
+        delete.Arguments.Add(nameArgument);
+        delete.SetAction(async (parseResult, cancellationToken) =>
+        {
+            string name = parseResult.GetValue(nameArgument)!;
+            bool removed = Captr.Core.Secrets.CredentialVault.Delete(name);
+            await Console.Out.WriteLineAsync(removed ? $"Secret '{name}' deleted." : $"No secret named '{name}' was stored.");
+            return ExitCodes.Success;
+        });
+        command.Subcommands.Add(delete);
+
+        return command;
+    }
+
+    /// <summary>Masked interactive secret entry — characters echo as '*'.</summary>
+    private static byte[] ReadMasked(string prompt)
+    {
+        Console.Write(prompt);
+        var buffer = new List<byte>();
+        while (true)
+        {
+            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter)
+            {
+                Console.WriteLine();
+                return [.. buffer];
+            }
+
+            if (key.Key == ConsoleKey.Backspace)
+            {
+                if (buffer.Count > 0)
+                {
+                    buffer.RemoveAt(buffer.Count - 1);
+                    Console.Write("\b \b");
+                }
+
+                continue;
+            }
+
+            buffer.AddRange(System.Text.Encoding.UTF8.GetBytes([key.KeyChar]));
+            Console.Write('*');
+        }
     }
 
     // ---- plumbing ---------------------------------------------------------------

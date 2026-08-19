@@ -156,6 +156,7 @@ public sealed class SessionPlanner
             QualityPreset = preset.Name,
             EncoderArguments = FfmpegArgumentBuilder.Build(plan),
             WorkingFolder = workingFolder,
+            Label = label,
         };
 
         var context = new RecordingSession.SessionContext(

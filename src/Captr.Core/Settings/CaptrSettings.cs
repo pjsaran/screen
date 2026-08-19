@@ -101,6 +101,14 @@ public sealed record DestinationSettings
     /// <summary>For SharePoint: folder path within the document library.</summary>
     public string? SharePointFolder { get; init; }
 
+    /// <summary>For SharePoint: the Entra tenant id of the app registration.</summary>
+    public string? TenantId { get; init; }
+
+    /// <summary>For SharePoint: the app registration's client id. NOT a secret —
+    /// the client secret/certificate lives in the credential vault under
+    /// <see cref="CredentialName"/>.</summary>
+    public string? ClientId { get; init; }
+
     /// <summary>Credential Manager entry name holding this destination's secret.
     /// The secret itself never appears in settings (SPEC §7).</summary>
     public string? CredentialName { get; init; }

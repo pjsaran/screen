@@ -125,6 +125,8 @@ public static class IpcKinds
     public const string ListRecordings = "list-recordings";
     public const string Verify = "verify";
     public const string Recover = "recover";
+    public const string ListDeliveries = "list-deliveries";
+    public const string RetryDelivery = "retry-delivery";
 }
 
 public sealed record HelloRequest(int ProtocolVersion, string ClientVersion);
@@ -171,3 +173,16 @@ public sealed record VerifyResponse(bool Intact, IReadOnlyList<string> Problems)
 public sealed record RecoverResponse(IReadOnlyList<RecoverySummary> Recovered);
 
 public sealed record RecoverySummary(string Folder, bool Succeeded, string? FailureReason, TimeSpan RecoveredDuration);
+
+public sealed record DeliverySummary(
+    long Id,
+    string OutputPath,
+    string DestinationName,
+    string State,
+    int Attempts,
+    DateTimeOffset? NextAttemptUtc,
+    string? LastError);
+
+public sealed record ListDeliveriesResponse(IReadOnlyList<DeliverySummary> Deliveries);
+
+public sealed record RetryDeliveryRequest(long Id);

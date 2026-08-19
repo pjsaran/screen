@@ -54,3 +54,10 @@ NOTIFY_FOR_THIS_SESSION
 SetThreadExecutionState
 ShutdownBlockReasonCreate
 ShutdownBlockReasonDestroy
+
+// --- Credential storage (SPEC §7) ---
+CredRead
+CredWrite
+CredDelete
+CredFree
+CREDENTIALW

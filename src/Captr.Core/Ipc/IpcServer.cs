@@ -141,6 +141,10 @@ public sealed class IpcServer : IAsyncDisposable
                     await _operations.VerifyAsync(envelope.PayloadAs<VerifyRequest>() ?? new VerifyRequest(""), cancellationToken).ConfigureAwait(false)),
                 IpcKinds.Recover => IpcProtocol.Envelope(IpcKinds.Recover,
                     await _operations.RecoverAsync(cancellationToken).ConfigureAwait(false)),
+                IpcKinds.ListDeliveries => IpcProtocol.Envelope(IpcKinds.ListDeliveries,
+                    await _operations.ListDeliveriesAsync(cancellationToken).ConfigureAwait(false)),
+                IpcKinds.RetryDelivery => IpcProtocol.Envelope(IpcKinds.RetryDelivery,
+                    await _operations.RetryDeliveryAsync(envelope.PayloadAs<RetryDeliveryRequest>() ?? new RetryDeliveryRequest(0), cancellationToken).ConfigureAwait(false)),
 
                 // Unknown kinds are ANSWERED, never fatal (SPEC §14): a newer
                 // client's new feature degrades to an error message, not a hang.

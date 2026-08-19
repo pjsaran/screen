@@ -70,6 +70,9 @@ public sealed record SessionStarted : JournalEvent
 
     /// <summary>Where the session's working files live.</summary>
     public required string WorkingFolder { get; init; }
+
+    /// <summary>Optional user label for this session, used in output naming.</summary>
+    public string? Label { get; init; }
 }
 
 /// <summary>One display inside <see cref="SessionStarted"/>: identity plus the

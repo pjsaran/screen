@@ -1,4 +1,5 @@
 using Captr.Core.Ipc;
+using Captr.Core.Secrets;
 using Captr.Core.Settings;
 using Captr.Core.WindowsEvents;
 
@@ -40,10 +41,15 @@ public sealed class HostRuntime
         {
             var settingsStore = new SettingsStore();
             using var systemEvents = new MessageOnlyWindow();
-            var service = new HostService(settingsStore, systemEvents, log);
+            var deliveryQueue = new Delivery.DeliveryQueue();
+            var deliveryWorker = new Delivery.DeliveryWorker(deliveryQueue, settingsStore, log);
+            var service = new HostService(settingsStore, systemEvents, log, deliveryQueue, deliveryWorker);
 
             // SPEC §6: recover interrupted sessions BEFORE accepting new work.
             await service.RunRecoveryScanAsync(cancellationToken).ConfigureAwait(false);
+
+            using var deliveryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Task deliveryTask = deliveryWorker.RunAsync(deliveryCts.Token);
 
             await using var ipcServer = new IpcServer(service, _hostVersion, log);
             ipcServer.Start();
@@ -57,6 +63,8 @@ public sealed class HostRuntime
                 if (!service.IsBusy && DateTimeOffset.UtcNow - service.LastActivityUtc > IdleExitDelay)
                 {
                     log.Information("Host idle for {Idle} — exiting (nothing runs when nothing records)", IdleExitDelay);
+                    await deliveryCts.CancelAsync().ConfigureAwait(false);
+                    await deliveryTask.ConfigureAwait(false);
                     return 0;
                 }
             }
@@ -90,6 +98,9 @@ public sealed class HostRuntime
 
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
+            // The redaction policy lives at logger construction (SPEC §7/§12) —
+            // any secret-suggestive property is masked no matter who logs it.
+            .WithSecretRedaction()
             .Enrich.WithProperty("ProcessRole", "host")
             .WriteTo.File(
                 Path.Combine(logFolder, "host-.log"),

@@ -22,4 +22,8 @@ public interface IHostOperations
     Task<VerifyResponse> VerifyAsync(VerifyRequest request, CancellationToken cancellationToken);
 
     Task<RecoverResponse> RecoverAsync(CancellationToken cancellationToken);
+
+    Task<ListDeliveriesResponse> ListDeliveriesAsync(CancellationToken cancellationToken);
+
+    Task<StateResponse> RetryDeliveryAsync(RetryDeliveryRequest request, CancellationToken cancellationToken);
 }

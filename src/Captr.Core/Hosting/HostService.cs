@@ -1,4 +1,6 @@
+using Captr.Core.Delivery;
 using Captr.Core.Ipc;
+using Captr.Core.Naming;
 using Captr.Core.Sessions;
 using Captr.Core.Settings;
 using Captr.Core.Supervision;
@@ -19,6 +21,8 @@ public sealed class HostService : IHostOperations
 {
     private readonly SettingsStore _settingsStore;
     private readonly MessageOnlyWindow? _systemEvents;
+    private readonly DeliveryQueue _deliveryQueue;
+    private readonly DeliveryWorker? _deliveryWorker;
     private readonly ILogger _log;
     private readonly Lock _gate = new();
 
@@ -26,25 +30,38 @@ public sealed class HostService : IHostOperations
     private Task<FinalizationResult>? _sessionRun;
     private DateTimeOffset _lastActivityUtc = DateTimeOffset.UtcNow;
 
-    public HostService(SettingsStore settingsStore, MessageOnlyWindow? systemEvents, ILogger log)
+    public HostService(
+        SettingsStore settingsStore,
+        MessageOnlyWindow? systemEvents,
+        ILogger log,
+        DeliveryQueue? deliveryQueue = null,
+        DeliveryWorker? deliveryWorker = null)
     {
         _settingsStore = settingsStore;
         _systemEvents = systemEvents;
         _log = log.ForContext<HostService>();
+        _deliveryQueue = deliveryQueue ?? new DeliveryQueue();
+        _deliveryWorker = deliveryWorker;
     }
 
     /// <summary>When the host last did anything — feeds the idle-exit timer.</summary>
     public DateTimeOffset LastActivityUtc => _lastActivityUtc;
 
-    /// <summary>True while a session is running or finalising.</summary>
+    /// <summary>True while a session is running/finalising or deliveries are still
+    /// draining — either keeps the host from its idle exit.</summary>
     public bool IsBusy
     {
         get
         {
             lock (_gate)
             {
-                return _sessionRun is { IsCompleted: false };
+                if (_sessionRun is { IsCompleted: false })
+                {
+                    return true;
+                }
             }
+
+            return _deliveryWorker?.HasPendingWork == true;
         }
     }
 
@@ -76,7 +93,14 @@ public sealed class HostService : IHostOperations
         lock (_gate)
         {
             _session = session;
-            _sessionRun = Task.Run(() => session.RunAsync(CancellationToken.None), CancellationToken.None);
+            _sessionRun = Task.Run(
+                async () =>
+                {
+                    FinalizationResult result = await session.RunAsync(CancellationToken.None).ConfigureAwait(false);
+                    HandleFinalized(result);
+                    return result;
+                },
+                CancellationToken.None);
         }
 
         _log.Information("Recording started: session {SessionId} into {Folder}",
@@ -231,6 +255,89 @@ public sealed class HostService : IHostOperations
         }
 
         return reports;
+    }
+
+    public Task<ListDeliveriesResponse> ListDeliveriesAsync(CancellationToken cancellationToken)
+    {
+        Touch();
+        return Task.FromResult(new ListDeliveriesResponse(
+        [
+            .. _deliveryQueue.List().Select(i => new DeliverySummary(
+                i.Id, i.OutputPath, i.DestinationName, i.State, i.Attempts, i.NextAttemptUtc, i.LastError)),
+        ]));
+    }
+
+    public Task<StateResponse> RetryDeliveryAsync(RetryDeliveryRequest request, CancellationToken cancellationToken)
+    {
+        Touch();
+        _deliveryQueue.Retry(request.Id);
+        return Task.FromResult(new StateResponse("pending", $"Delivery {request.Id} queued for retry."));
+    }
+
+    /// <summary>
+    /// The stop-side hand-off (SPEC §7): rename each finalised output by the user's
+    /// pattern (sanitised, collision-suffixed — within the working folder, so
+    /// nothing leaves it) and enqueue one delivery per enabled destination.
+    /// Failures here are logged, never thrown — the recording itself is already
+    /// safe on disk, and delivery problems must not look like recording problems.
+    /// </summary>
+    private void HandleFinalized(FinalizationResult result)
+    {
+        try
+        {
+            CaptrSettings settings = _settingsStore.Load();
+            var context = new NamingContext
+            {
+                StartUtc = result.Coverage.StartUtc,
+                EndUtc = result.Coverage.EndUtc,
+                MachineName = result.Session.MachineName,
+                UserName = result.Session.UserName,
+                TimeZone = FindTimeZone(result.Session.LocalTimeZoneId),
+                Label = result.Session.Label,
+            };
+
+            int groupIndex = 0;
+            foreach (string output in result.OutputFiles)
+            {
+                groupIndex++;
+                string desiredName = OutputNamer.BuildFileName(settings.OutputPattern, context);
+                if (result.OutputFiles.Count > 1)
+                {
+                    // Multiple arrangement groups: part-number the outputs.
+                    desiredName = Path.GetFileNameWithoutExtension(desiredName)
+                        + FormattableString.Invariant($" part{groupIndex}") + Path.GetExtension(desiredName);
+                }
+
+                string workingFolder = Path.GetDirectoryName(output)!;
+                string finalPath = OutputNamer.ResolveCollision(workingFolder, desiredName);
+                File.Move(output, finalPath);
+                _log.Information("Output named {Final}", finalPath);
+
+                foreach (DestinationSettings destination in settings.Destinations.Where(d => d.Enabled))
+                {
+                    long id = _deliveryQueue.Enqueue(finalPath, destination.Name);
+                    _log.Information("Delivery {Id} queued: {File} → {Destination}", id, finalPath, destination.Name);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or SettingsValidationException)
+        {
+            _log.Error(exception, "Output naming/enqueue failed; the finalised files remain in the working folder");
+        }
+
+        Touch();
+    }
+
+    private static TimeZoneInfo FindTimeZone(string id)
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(id);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return TimeZoneInfo.Local;
+        }
     }
 
     private RecordingSession? ActiveSession()
