@@ -10,6 +10,9 @@
     <RootNamespace>Captr.Core</RootNamespace>
     <!-- Public types carry doc comments (SPEC §12); the XML file also feeds IDE help. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CsWin32-generated display-config calls take pointers; unsafe code is confined
+         to the interop call sites (SPEC §12: platform invocation in one place). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
