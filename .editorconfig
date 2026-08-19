@@ -35,7 +35,16 @@ dotnet_style_readonly_field = true:warning
 dotnet_sort_system_directives_first = true
 csharp_using_directive_placement = outside_namespace:error
 
-# Naming: interfaces start with I, private fields with _camelCase, constants PascalCase.
+# Naming: private INSTANCE fields are _camelCase; private static/const fields are
+# PascalCase (rule order matters — the static rule must come first to win).
+dotnet_naming_rule.private_static_fields_pascal.symbols = private_static_fields
+dotnet_naming_rule.private_static_fields_pascal.style = pascal_case_style
+dotnet_naming_rule.private_static_fields_pascal.severity = warning
+dotnet_naming_symbols.private_static_fields.applicable_kinds = field
+dotnet_naming_symbols.private_static_fields.applicable_accessibilities = private
+dotnet_naming_symbols.private_static_fields.required_modifiers = static
+dotnet_naming_style.pascal_case_style.capitalization = pascal_case
+
 dotnet_naming_rule.private_fields_underscore.symbols = private_fields
 dotnet_naming_rule.private_fields_underscore.style = underscore_camel
 dotnet_naming_rule.private_fields_underscore.severity = warning
@@ -51,3 +60,6 @@ dotnet_diagnostic.CS1591.severity = none  # enabled per-project once XML docs ar
 # Test method names are sentences (Underscores_between_words) and self-documenting;
 # doc-comment and naming style rules relax accordingly.
 dotnet_diagnostic.CA1707.severity = none
+# Test fixtures implement IDisposable purely for per-test cleanup; the
+# GC.SuppressFinalize ceremony (CA1816) adds nothing there.
+dotnet_diagnostic.CA1816.severity = none

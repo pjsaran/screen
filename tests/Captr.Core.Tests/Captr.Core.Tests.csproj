@@ -8,13 +8,20 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <RootNamespace>Captr.Core.Tests</RootNamespace>
+    <!-- xunit.v3 runs on Microsoft.Testing.Platform; this opts `dotnet test` into it
+         (the legacy VSTest path no longer exists on the .NET 10 SDK). -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <OutputType>Exe</OutputType>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Every test file uses xunit attributes; import the namespace once. -->
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Captr.Core\Captr.Core.csproj" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
-    <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="NSubstitute" />
   </ItemGroup>
