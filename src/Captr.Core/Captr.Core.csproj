@@ -16,6 +16,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Tests may exercise internal helpers (e.g. segment-name parsing). -->
+    <InternalsVisibleTo Include="Captr.Core.Tests" />
+    <InternalsVisibleTo Include="Captr.Integration.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- All P/Invoke is source-generated from Interop/NativeMethods.txt (SPEC §12:
          "all platform invocation is source-generated, confined to one place"). -->
     <PackageReference Include="Microsoft.Windows.CsWin32" PrivateAssets="all" />
