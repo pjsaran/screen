@@ -59,8 +59,9 @@ try {
         dotnet test (Join-Path $RepoRoot 'tests\Captr.Core.Tests') --configuration $Configuration --no-build
         if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed.' }
 
-        # Chaos is CI-safe (all lavfi-based) so it always runs; Display/Gpu need a
-        # real desktop and GPU, and Soak needs patience — both only with -Full.
+        # Chaos is CI-safe (all lavfi-based) so it always runs. Display/Gpu need a
+        # real desktop and GPU; Soak needs both AND patience — only with -Full.
+        # The soak's length comes from CAPTR_SOAK_MINUTES (default 6).
         $filter = if ($Full) {
             "$TestFilter|Category=Chaos|Category=Display|Category=Gpu|Category=Soak"
         } else {

@@ -64,6 +64,11 @@ public static class SupervisionConstants
     /// <inheritdoc cref="FaultThreshold"/>
     public static readonly TimeSpan FaultWindow = TimeSpan.FromMinutes(5);
 
+    /// <summary>Ceiling for the capture-access-lost backoff. A UAC prompt can sit
+    /// on screen for minutes; retrying every 15 s costs nothing and resumes
+    /// promptly once the desktop returns (SPEC §6).</summary>
+    public static readonly TimeSpan CaptureRetryCeiling = TimeSpan.FromSeconds(15);
+
     /// <summary>Lines of encoder log kept for diagnostics and journaled on failure.
     /// Bounded so a log-flooding encoder cannot exhaust memory (SPEC §6).</summary>
     public const int LogTailLines = 400;

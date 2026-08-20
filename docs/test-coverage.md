@@ -64,7 +64,8 @@ delivery queue state machine and backoff, support-bundle secret scrubbing.
 | Starting twice and stopping when idle both succeed | `Cli/CliContractTests`, `Cli/CliRedirectionTests`, `Ipc/CrossProcessHostTests` |
 | A recording started by one invocation is stopped by another, in a separate process | `Ipc/CrossProcessHostTests` |
 | CLI usable from a scheduler (output captured, returns promptly) | `Cli/CliRedirectionTests` — regression guard for a real hang |
-| **Task Scheduler task, logged-on vs session 0** | **deferred** — manual, in the runbook; the session-0 warning is documented prominently in `docs/task-scheduler.md`. |
+| Task Scheduler task (run only when logged on) starts and stops a recording | **verified on this machine**: `schtasks /Create … /IT` for start and stop, run via `schtasks /Run`, producing a finalised, correctly-named output. The script that did it is reproducible from the worked example in `docs/task-scheduler.md`. |
+| **The session-0 half of that check** (configuring "whether logged on or not" and observing that it records nothing usable) | **deferred** — it needs stored credentials for a non-interactive task and produces a deliberately broken recording; the warning is documented prominently in `docs/task-scheduler.md`. |
 
 ## Packaging and upgrade
 
@@ -82,11 +83,19 @@ are **deferred** to the runbook. The licence report gate runs on every build.
 | Trailing bytes of the last segment corrupted, then recovery | `ChaosTests` |
 | Working folder deleted mid-session | `ChaosTests` |
 | **Power loss mid-write** | partial — the truncated-segment and corrupted-tail cases reproduce its on-disk artefact; a true power cut is **deferred** (manual). |
-| **Disk filled to zero; display unplugged / resolution / DPI changed; sleep-resume; lock-unlock; RDP connect-disconnect; GPU driver reset** | **deferred** — each needs hardware or admin state this machine cannot script safely. The handling code paths exist and are reviewed (`WindowsEvents`, `DiskGuard`, topology rebuild); the runbook lists them as manual checks. |
+| UAC secure desktop / session switch tolerated with backoff, never counted as an encoder fault | `Supervision/SupervisorPolicyTests` (classification + capped backoff + reset) | — |
+| **Disk filled to zero; display unplugged / resolution / DPI changed; sleep-resume; lock-unlock; RDP connect-disconnect; GPU driver reset** | **deferred** — each needs hardware or admin state this machine cannot script safely. The handling code paths exist and are reviewed (`WindowsEvents`, `DiskGuard`, topology rebuild, capture-loss backoff); the runbook lists them as manual checks. |
 
 ## Soak — `tests/Captr.Integration.Tests/Soak`
 
-`SoakTests` asserts wall-vs-encoded drift < 1 s, no handle or memory growth trend,
-zero repairs, coverage > 99.9 %, a clean integrity verify, and an internally
-consistent journal. Duration is `CAPTR_SOAK_MINUTES` (green at 3 and 4 minutes
-locally; the runbook sets 600 for the specified ten-hour run — same assertions).
+`SoakTests` runs the REAL capture path (ddagrab → the machine's proven hardware
+encoder, through `RecordingSession`) and asserts wall-vs-encoded drift < 1 s, no
+handle or memory growth trend, zero repairs, coverage > 99.9 %, a clean integrity
+verify, and an internally consistent journal. Duration is `CAPTR_SOAK_MINUTES`;
+the runbook sets 600 for the specified ten-hour run — same assertions, longer
+clock.
+
+It deliberately does NOT soak a synthetic `lavfi` source: one paced with `-re`
+carries about a percent of its own pacing slop, so a drift assertion against it
+measures FFmpeg's test-source timer rather than Captr's timeline. Real capture is
+clocked by the compositor, which is what the spec's one-second bar is about.

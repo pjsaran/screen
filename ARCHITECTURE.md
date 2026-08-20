@@ -64,6 +64,21 @@ detail.
    destination — a verified folder copy, or a resumable SharePoint upload that
    continues from the last confirmed 320 KiB-multiple chunk
    (`Captr.Core.Delivery`). A delivery failure can never endanger the local file.
+10. Much later, `RetentionCleaner` reclaims the disk — but only for sessions that
+    are finalised, delivered *and* verified somewhere else, and past the
+    retention period. A recording that exists nowhere but here is never deleted
+    automatically.
+
+## What survives what
+
+| Something dies | What happens |
+|---|---|
+| The encoder (crash, stall, someone ends the task) | Supervisor restarts it into a new segment within seconds; the gap is journaled with its real duration. Only faults count toward the single hardware→software fallback. |
+| The host (crash, kill) | FFmpeg keeps writing — it is deliberately not in a job object. The next host re-adopts it (PID + start time + image path + in-file marker), stops it, and finalises. Loss is the encoder's unflushed output buffer, not the segment. |
+| The UI (crash, kill, closed) | Nothing. It holds no recording state; relaunching reattaches on its next status poll. |
+| The machine (power loss) | Segments already written are playable; the truncated last one is repaired by tolerant remux; the journal survives because every append is flushed to physical disk. |
+| The network / a destination / a credential | Only the transfer. The local file is untouched, and the queue resumes from the last confirmed chunk. |
+| The disk filling | The session stops CLEANLY before it fills, warning in minutes-remaining first, with a ballast file reserved so finalisation always has room. |
 
 ## Where things live at runtime
 
@@ -75,6 +90,29 @@ detail.
 | Delivery queue | `%LOCALAPPDATA%\Captr\delivery.db` |
 | Encoder cache | `%LOCALAPPDATA%\Captr\encoder-cache.json` |
 | Credentials | Windows Credential Manager (DPAPI-wrapped), never in files |
+
+## The map
+
+Every folder below has a README explaining, in plain English, what it owns and
+where to start reading.
+
+| Folder | Owns |
+|---|---|
+| `Captr.Core/Common` | Torn-read-free file writing, build identity |
+| `Captr.Core/Displays` | Which monitors exist, and stable identity for them |
+| `Captr.Core/Encoders` | Arrangement, the FFmpeg argument vector, encoder proving, quality |
+| `Captr.Core/Supervision` | Keeping the encoder alive and honest; re-adoption |
+| `Captr.Core/Sessions` | The recording engine, the journal, finalisation and recovery |
+| `Captr.Core/WindowsEvents` | Sleep, lock, RDP, display change, shutdown |
+| `Captr.Core/Ipc` | The named-pipe protocol between UI/CLI and host |
+| `Captr.Core/Hosting` | The headless host: operations and lifecycle |
+| `Captr.Core/Delivery` | The persisted queue, destinations, retention |
+| `Captr.Core/Secrets` | The only place secrets exist; enforced redaction |
+| `Captr.Core/Settings` | The small settings model, validation, migration, the recording lock |
+| `Captr.Core/Naming` | Output names: tokens, sanitisation, collisions |
+| `Captr.Core/Diagnostics` | The support bundle (no video, no secrets) |
+| `Captr.Core/Cli` | Every command and its documented exit code |
+| `Captr.App` | The WPF UI, and the `--host` role switch |
 
 ## Reading order for a new contributor
 

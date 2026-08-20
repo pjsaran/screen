@@ -106,6 +106,35 @@ public sealed class EncoderSupervisor
                     stopWasRequested: false, killedForStall, exitCode, _logTail.Snapshot());
                 pendingGapStartUtc ??= DateTimeOffset.UtcNow;
 
+                // The desktop went away (UAC secure desktop, session switch, RDP).
+                // Wait before trying again instead of hammering DXGI, and do NOT
+                // count it toward the fallback — a different encoder cannot conjure
+                // a desktop (SPEC §6).
+                if (exitKind == ExitKind.CaptureAccessLost)
+                {
+                    TimeSpan delay = _policy.NextCaptureRetryDelay();
+                    _log.Warning(
+                        "Capture access lost (secure desktop, session switch, or remote-desktop transition); retrying in {Delay}",
+                        delay);
+                    _journal.Append(new SessionNote
+                    {
+                        TimestampUtc = DateTimeOffset.UtcNow,
+                        Text = $"Capture access lost; waiting {delay.TotalSeconds:F0}s before trying again. " +
+                               "The gap is recorded; recording resumes as soon as the desktop returns.",
+                    });
+
+                    try
+                    {
+                        await Task.Delay(delay, stopToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        return new SupervisionOutcome(SupervisionEndKind.StoppedGracefully, null, _logTail.Snapshot());
+                    }
+
+                    continue;
+                }
+
                 bool countsTowardFallback = exitKind == ExitKind.Fault;
                 _journal.Append(new EncoderRestarted
                 {
@@ -205,6 +234,7 @@ public sealed class EncoderSupervisor
             if (_latestProgress is { } progress)
             {
                 _policy.OnProgress(progress);
+                _policy.OnCaptureRecovered(); // frames are flowing — the desktop is back
 
                 // A pending gap (from a previous restart) closes at the first
                 // progress of the new process — journal its honest duration.

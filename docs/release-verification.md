@@ -10,9 +10,15 @@ and names each deferred item — read it alongside this checklist.
 
 ## Automated (every release build)
 
+The whole of this section is one command — `pwsh build/build.ps1 -Installer` —
+which is SPEC §15's "a signed installer, checksums, and a release record are
+produced by a single command".
+
 - [x] `build/build.ps1`: formatting verified, warnings-as-errors build, unit +
-      CI-safe integration tests, licence gate (report committed, no disallowed
-      licence, transitive included).
+      CI-safe integration tests (unit, Ffmpeg, Chaos), licence gate (report
+      committed, no disallowed licence, transitive included). Add `-Full` to
+      include the Display, Gpu, and Soak categories on a machine with a real
+      desktop and GPU.
 - [x] `build/fetch-ffmpeg.ps1`: pinned LGPL FFmpeg checksum-verified; `ddagrab`
       and hardware encoders asserted; libopenh264 presence recorded.
 - [x] `build/make-installer.ps1`: installer built from pinned Inno Setup,
@@ -39,8 +45,9 @@ On EACH of a clean Windows 10 (≥17763) and Windows 11 VM:
 ☐ `verify-install.ps1` passes end-to-end.
 ☐ A Task Scheduler task configured **run only when user is logged on** starts and
   stops a recording (docs/task-scheduler.md example), and the resulting file is
-  correct. Then reconfigure the same task "whether user is logged on or not" and
-  observe the recording is black/unusable — confirming the documented warning.
+  correct. *(This half is already verified on the development machine — repeat it
+  on the VMs.)* Then reconfigure the same task "whether user is logged on or not"
+  and observe the recording is black/unusable — confirming the documented warning.
 ☐ Upgrade: install version N-1, configure settings + a credential + start/interrupt
   a session (kill the host mid-recording), queue a delivery to an unreachable
   destination. Install version N: refused while recording unless `/FORCESTOP=yes`;

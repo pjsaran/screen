@@ -58,6 +58,17 @@ Interactive uninstall asks whether to remove them (default: keep); silent
 uninstall always keeps. Stored credentials are never removed by the uninstaller —
 remove them explicitly with `captr auth delete <name>` beforehand if desired.
 
+## Knowing what you have
+
+```
+captr version
+```
+
+reports the application version, the source commit it was built from, the exact
+bundled FFmpeg build, and the .NET runtime. The same block appears on the UI's
+Diagnostics page, and the matching `release.json` beside the installer records the
+identical identifiers plus file hashes.
+
 ## Verifying an installation
 
 ```powershell

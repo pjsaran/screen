@@ -146,6 +146,58 @@ public class SupervisorPolicyTests
             .ShouldBe(ExitKind.Fault);
     }
 
+    [Theory]
+    [InlineData("[ddagrab @ 0000] Failed to duplicate output")]
+    [InlineData("DXGI_ERROR_ACCESS_LOST")]
+    [InlineData("[in#0] ACCESS_DENIED acquiring the desktop")]
+    public void Losing_the_desktop_is_its_own_kind_not_an_encoder_fault(string logLine)
+    {
+        // UAC's secure desktop, a session switch, an RDP transition. Counting these
+        // as faults would march a healthy session through the fallback to a loud
+        // stop just because someone left a UAC prompt open (SPEC §6).
+        SupervisorPolicy.ClassifyExit(
+            stopWasRequested: false, killedForStall: false, exitCode: 1, logTail: [logLine])
+            .ShouldBe(ExitKind.CaptureAccessLost);
+    }
+
+    [Fact]
+    public void A_genuine_ddagrab_failure_is_still_a_fault_not_a_transient_capture_loss()
+    {
+        // The classifier must be narrow: if any line MENTIONING ddagrab counted as
+        // transient, a real capture fault would retry forever and the fallback
+        // ladder would silently never engage.
+        SupervisorPolicy.ClassifyExit(
+            stopWasRequested: false, killedForStall: false, exitCode: 1,
+            logTail: ["[ddagrab @ 0000] Error initializing filter 'ddagrab'"])
+            .ShouldBe(ExitKind.Fault);
+    }
+
+    [Fact]
+    public void Capture_retries_back_off_and_are_capped()
+    {
+        var policy = new SupervisorPolicy();
+
+        policy.NextCaptureRetryDelay().ShouldBe(TimeSpan.FromSeconds(1));
+        policy.NextCaptureRetryDelay().ShouldBe(TimeSpan.FromSeconds(2));
+        policy.NextCaptureRetryDelay().ShouldBe(TimeSpan.FromSeconds(4));
+        policy.NextCaptureRetryDelay().ShouldBe(TimeSpan.FromSeconds(8));
+        policy.NextCaptureRetryDelay().ShouldBe(SupervisionConstants.CaptureRetryCeiling);
+        policy.NextCaptureRetryDelay().ShouldBe(SupervisionConstants.CaptureRetryCeiling, "the backoff is capped");
+    }
+
+    [Fact]
+    public void The_backoff_resets_once_frames_flow_again()
+    {
+        var policy = new SupervisorPolicy();
+        policy.NextCaptureRetryDelay();
+        policy.NextCaptureRetryDelay();
+
+        policy.OnCaptureRecovered();
+
+        policy.NextCaptureRetryDelay().ShouldBe(TimeSpan.FromSeconds(1),
+            "a later loss starts its own backoff from the beginning");
+    }
+
     [Fact]
     public void Faults_below_the_threshold_just_restart()
     {

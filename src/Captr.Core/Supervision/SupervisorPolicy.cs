@@ -17,6 +17,7 @@ public sealed class SupervisorPolicy
     private long _lastReportedTotalBytes;
     private DateTimeOffset? _slowSince;
     private bool _fellBack;
+    private int _consecutiveCaptureLosses;
 
     /// <summary>Record a progress observation.</summary>
     public void OnProgress(EncoderProgress progress)
@@ -113,6 +114,16 @@ public sealed class SupervisorPolicy
             return ExitKind.Fault;
         }
 
+        // Capture access lost is NOT an encoder fault: the desktop was temporarily
+        // taken away (UAC's secure desktop, a session switch, an RDP transition).
+        // SPEC §6 says tolerate these with backoff rather than restarting
+        // aggressively — and they must never push the session toward the software
+        // encoder, which would not help in the slightest.
+        if (IndicatesCaptureAccessLost(logTail))
+        {
+            return ExitKind.CaptureAccessLost;
+        }
+
         bool logShowsErrors = logTail.Any(static line =>
             line.Contains("Error", StringComparison.OrdinalIgnoreCase)
             || line.Contains("Conversion failed", StringComparison.OrdinalIgnoreCase)
@@ -153,6 +164,38 @@ public sealed class SupervisorPolicy
 
     /// <summary>True once the fallback has been taken.</summary>
     public bool HasFallenBack => _fellBack;
+
+    /// <summary>
+    /// How long to wait before relaunching after capture access was lost. Backs off
+    /// 1s, 2s, 4s… to a ceiling, because the desktop may be unavailable for as long
+    /// as a user stares at a UAC prompt, and hammering DXGI for minutes helps
+    /// nobody (SPEC §6). Any successful progress resets it.
+    /// </summary>
+    public TimeSpan NextCaptureRetryDelay()
+    {
+        TimeSpan delay = TimeSpan.FromSeconds(Math.Min(
+            SupervisionConstants.CaptureRetryCeiling.TotalSeconds,
+            Math.Pow(2, _consecutiveCaptureLosses)));
+        _consecutiveCaptureLosses++;
+        return delay;
+    }
+
+    /// <summary>Called when the encoder produces progress again — the desktop is
+    /// back, so the next loss starts its backoff from the beginning.</summary>
+    public void OnCaptureRecovered() => _consecutiveCaptureLosses = 0;
+
+    /// <summary>
+    /// Log signatures of "the desktop was taken away from us" — DXGI access loss,
+    /// not encoder trouble. Deliberately NARROW: matching any line that merely
+    /// mentions ddagrab would classify genuine capture faults as transient and
+    /// quietly disable the fallback ladder, so only these specific access failures
+    /// count.
+    /// </summary>
+    private static bool IndicatesCaptureAccessLost(IReadOnlyList<string> logTail) =>
+        logTail.Any(static line =>
+            line.Contains("ACCESS_LOST", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("ACCESS_DENIED", StringComparison.OrdinalIgnoreCase)
+            || line.Contains("Failed to duplicate output", StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>How an encoder exit is classified.</summary>
@@ -166,6 +209,12 @@ public enum ExitKind
 
     /// <summary>Something outside Captr ended it. Restart, but do not count it (SPEC §6).</summary>
     External,
+
+    /// <summary>The desktop was momentarily unavailable — UAC's secure desktop, a
+    /// session switch, a remote-desktop transition. Restart AFTER a backoff, and
+    /// never count it toward the fallback: a different encoder cannot help when the
+    /// problem is that there is nothing to capture (SPEC §6).</summary>
+    CaptureAccessLost,
 }
 
 /// <summary>What to do after a fault.</summary>

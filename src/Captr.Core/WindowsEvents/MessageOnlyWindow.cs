@@ -56,6 +56,21 @@ public sealed class MessageOnlyWindow : IDisposable
     /// <summary>The created window handle (for ShutdownBlock registration).</summary>
     public nint Handle => _hwnd;
 
+    /// <summary>
+    /// Set while a <see cref="ShutdownBlock"/> is registered. WM_QUERYENDSESSION
+    /// answers FALSE while this is true, which is what actually makes Windows WAIT
+    /// (and show our reason on the shutdown screen) instead of proceeding and
+    /// killing us mid-finalisation. Clearing it — which the session does the moment
+    /// finalisation completes — lets the shutdown continue (SPEC §6).
+    /// </summary>
+    public bool ShutdownBlocked
+    {
+        get => Volatile.Read(ref _shutdownBlocked);
+        set => Volatile.Write(ref _shutdownBlocked, value);
+    }
+
+    private bool _shutdownBlocked;
+
     public MessageOnlyWindow()
     {
         _thread = new Thread(MessageLoop)
@@ -164,9 +179,11 @@ public sealed class MessageOnlyWindow : IDisposable
 
             case PInvoke.WM_QUERYENDSESSION:
                 EndSessionRequested?.Invoke();
-                // TRUE = we do not veto; the ShutdownBlock reason buys the
-                // finalisation time (SPEC §6: block, finalise quickly, release).
-                return (LRESULT)1;
+                // FALSE while a block is registered: that is what makes Windows
+                // wait and show our reason. The session clears the flag as soon as
+                // the recording is finalised, and the shutdown proceeds
+                // (SPEC §6: block, finalise quickly, release).
+                return (LRESULT)(ShutdownBlocked ? 0 : 1);
 
             case PInvoke.WM_CLOSE:
                 PInvoke.DestroyWindow(hwnd);

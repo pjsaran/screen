@@ -18,6 +18,8 @@ namespace Captr.Core.Sessions;
 /// degradation. If it fails, the recording stops — so its loop records-and-continues
 /// rather than throwing (SPEC §12).
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable",
+    Justification = "The shutdown block is created and released entirely within RunAsync's lifetime; a session is not a disposable resource its callers hold.")]
 public sealed class RecordingSession
 {
     private readonly SessionContext _context;
@@ -34,6 +36,13 @@ public sealed class RecordingSession
     /// <summary>Settings handed to <see cref="ApplyDegradation"/>, consumed by the
     /// command loop so the change lands between encoder runs rather than under one.</summary>
     private Settings.CaptrSettings? _pendingDegradation;
+
+    /// <summary>Held only while Windows is waiting for us to finish (SPEC §6).</summary>
+    private ShutdownBlock? _shutdownBlock;
+
+    /// <summary>The event window whose ShutdownBlocked flag we must clear once
+    /// finalisation is done, so Windows can carry on shutting down.</summary>
+    private MessageOnlyWindow? _shutdownWindow;
 
     private RecordingSession(SessionContext context, SessionJournal journal, DiskGuard diskGuard, ILogger log)
     {
@@ -126,7 +135,22 @@ public sealed class RecordingSession
         events.Resumed += () => Post(SessionCommand.ResumeFromSuspend);
         events.DisplayChanged += () => Post(SessionCommand.TopologyChanged);
         events.TimeChanged += () => Post(SessionCommand.ClockChanged);
-        events.EndSessionRequested += () => Post(SessionCommand.Stop);
+
+        // Windows is shutting down or logging off. SPEC §6: register a shutdown
+        // block reason (so Windows waits AND the user can see why), finalise
+        // quickly, then release it — the block is disposed when RunAsync finishes.
+        events.EndSessionRequested += () =>
+        {
+            if (_shutdownBlock is null)
+            {
+                _shutdownBlock = new ShutdownBlock(
+                    events.Handle, "Captr is finishing the recording so no footage is lost.");
+                events.ShutdownBlocked = true;
+                _shutdownWindow = events;
+            }
+
+            Post(SessionCommand.Stop);
+        };
         events.SessionChanged += kind => Post(kind switch
         {
             // Lock: record it, keep recording — never stop (SPEC §6).
@@ -225,17 +249,36 @@ public sealed class RecordingSession
             _journal.Dispose();
         }
 
-        var pipeline = new FinalizationPipeline(_context.FfmpegPath, _context.FfprobePath, _log);
-        FinalizationResult result = await pipeline.RunAsync(_context.WorkingFolder, CancellationToken.None).ConfigureAwait(false);
-        _state = failure is null ? SessionState.Completed : SessionState.Failed;
-
-        if (failure is not null)
+        try
         {
-            _log.Error("Session {SessionId} ended in failure: {Failure}. Footage up to the failure is finalised.",
-                _context.SessionId, failure);
-        }
+            var pipeline = new FinalizationPipeline(_context.FfmpegPath, _context.FfprobePath, _log);
+            FinalizationResult result = await pipeline.RunAsync(_context.WorkingFolder, CancellationToken.None).ConfigureAwait(false);
+            _state = failure is null ? SessionState.Completed : SessionState.Failed;
 
-        return result;
+            if (failure is not null)
+            {
+                _log.Error("Session {SessionId} ended in failure: {Failure}. Footage up to the failure is finalised.",
+                    _context.SessionId, failure);
+            }
+
+            return result;
+        }
+        finally
+        {
+            // Release the shutdown block only NOW — after finalisation. Windows has
+            // been waiting on it (WM_QUERYENDSESSION answered FALSE), which is the
+            // whole point: the recording is safely closed before the machine goes
+            // down (SPEC §6). Order matters: clear the window flag first so a repeat
+            // query is answered TRUE, then destroy the reason.
+            if (_shutdownWindow is not null)
+            {
+                _shutdownWindow.ShutdownBlocked = false;
+                _shutdownWindow = null;
+            }
+
+            _shutdownBlock?.Dispose();
+            _shutdownBlock = null;
+        }
     }
 
     /// <summary>Consumes commands while a supervisor run is active. Notes and disk

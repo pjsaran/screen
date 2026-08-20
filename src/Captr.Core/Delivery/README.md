@@ -31,4 +31,9 @@ finalised output ──► DeliveryQueue (SQLite, survives crash/reboot)
   table's Microsoft.Graph SDK: the SDK's LargeFileUploadTask hides the per-chunk
   offset persistence SPEC §7 requires and resists base-URL redirection for tests;
   the protocol itself is three HTTP calls. Flagged as the spec invites.)
+- **RetentionCleaner** — the one place Captr deletes recorded data on its own:
+  only a session that is finalised, delivered *and* verified to at least one
+  destination, and past the retention period. A recording that exists nowhere but
+  the working folder is never removed automatically, because the recording
+  surviving outranks reclaiming disk.
 - Credentials come from `Captr.Core.Secrets` by name; nothing here holds one.

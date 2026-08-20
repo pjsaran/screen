@@ -1,7 +1,7 @@
 using System.Diagnostics;
 
 using Captr.Core.Sessions;
-using Captr.Core.Supervision;
+using Captr.Core.Settings;
 
 using Serilog.Core;
 
@@ -15,67 +15,75 @@ namespace Captr.Integration.Tests.Soak;
 /// consistent journal, every segment verified, and coverage above 99.9%.
 /// </summary>
 /// <remarks>
-/// Duration comes from the CAPTR_SOAK_MINUTES environment variable (default 6 for
-/// a local smoke of the machinery; the release runbook sets 600 for the full
-/// ten-hour run — same assertions, longer clock). Trait Soak keeps it out of
-/// normal runs.
+/// <para>
+/// Runs the REAL capture path — ddagrab into the machine's proven hardware encoder,
+/// through the actual <see cref="RecordingSession"/> — not a synthetic source.
+/// That matters for the drift assertion in particular: a lavfi source paced with
+/// <c>-re</c> has its own pacing slop of roughly a percent, so measuring drift
+/// against it measures FFmpeg's test-source timer rather than Captr's timeline.
+/// Real capture is clocked by the compositor, which is what the spec's
+/// one-second bar is actually about.
+/// </para>
+/// <para>
+/// Duration is <c>CAPTR_SOAK_MINUTES</c> (default 6; the release runbook sets 600
+/// for the specified ten-hour run — same assertions, longer clock).
+/// </para>
 /// </remarks>
 [Trait("Category", "Soak")]
-public class SoakTests
+public class SoakTests : IDisposable
 {
+    private readonly string _root = Directory.CreateTempSubdirectory("captr-soak-").FullName;
+
     [Fact]
     public async Task A_long_recording_stays_healthy_leak_free_and_fully_covered()
     {
         int minutes = int.TryParse(Environment.GetEnvironmentVariable("CAPTR_SOAK_MINUTES"), out int m) ? m : 6;
         TimeSpan duration = TimeSpan.FromMinutes(minutes);
 
-        using var session = new Supervision.SupervisionTestSession();
-        var supervisor = new EncoderSupervisor(session.FfmpegPath, session.Journal, Logger.None);
-        var spec = new EncoderRunSpec(
-            session.LavfiArguments(segmentSeconds: 30), null, session.WorkingFolder);
+        CaptrSettings settings = CaptrSettings.CreateDefault() with { WorkingFolder = _root, FrameRate = 10 };
+        (RecordingSession.SessionContext context, SessionStarted startEvent) =
+            await new SessionPlanner(Logger.None).PlanAsync(
+                settings, null, null, "soak", TestContext.Current.CancellationToken);
+
+        RecordingSession session = RecordingSession.Create(context, startEvent, Logger.None);
 
         using var currentProcess = Process.GetCurrentProcess();
         var samples = new List<(TimeSpan Elapsed, TimeSpan Encoded, int Handles, long ManagedBytes)>();
         var stopwatch = Stopwatch.StartNew();
 
-        using var stop = new CancellationTokenSource(duration);
-        Task<SupervisionOutcome> run = supervisor.RunAsync(spec, null, stop.Token);
+        Task<FinalizationResult> run = session.RunAsync(CancellationToken.None);
 
-        while (!run.IsCompleted)
+        while (stopwatch.Elapsed < duration && !run.IsCompleted)
         {
             await Task.Delay(TimeSpan.FromSeconds(20), CancellationToken.None);
             currentProcess.Refresh();
             samples.Add((
                 stopwatch.Elapsed,
-                supervisor.LatestProgress?.OutTime ?? TimeSpan.Zero,
+                session.LatestProgress?.OutTime ?? TimeSpan.Zero,
                 currentProcess.HandleCount,
                 GC.GetTotalMemory(forceFullCollection: false)));
         }
 
-        SupervisionOutcome outcome = await run;
+        session.RequestStop();
+        FinalizationResult result = await run.WaitAsync(TimeSpan.FromMinutes(5), CancellationToken.None);
         stopwatch.Stop();
-        outcome.Kind.ShouldBe(SupervisionEndKind.StoppedGracefully);
+
         samples.Count.ShouldBeGreaterThanOrEqualTo(6, "the soak must be long enough to sample");
 
         // --- Timestamp DRIFT: does the wall-vs-encoded offset GROW? --------------
-        // Not the absolute difference: a fixed offset is just startup latency
-        // (device open, first frame). Drift is that offset CHANGING over time,
-        // which is what makes a long recording's timeline untrustworthy.
-        //
-        // Averaged over several samples at each end, because a single sample
-        // carries up to ~0.75 s of measurement jitter on its own (FFmpeg writes a
-        // progress block roughly twice a second and the tailer polls every 250 ms).
-        // Comparing two lone samples would put ±1.5 s of noise against a 1 s bar —
-        // the assertion would be measuring the clock of the test, not the product.
-        double EarlyOffsetSeconds(int index) => (samples[index].Elapsed - samples[index].Encoded).TotalSeconds;
-        double earlyOffset = Enumerable.Range(1, 3).Average(EarlyOffsetSeconds);
-        double lateOffset = Enumerable.Range(samples.Count - 3, 3).Average(EarlyOffsetSeconds);
+        // Not the absolute difference — a fixed offset is startup latency (device
+        // open, first frame). Drift is that offset CHANGING, which is what makes a
+        // long recording's timeline untrustworthy. Averaged at each end because a
+        // single sample carries up to ~0.75 s of jitter on its own (FFmpeg writes
+        // progress about twice a second; the tailer polls every 250 ms).
+        double OffsetSeconds(int index) => (samples[index].Elapsed - samples[index].Encoded).TotalSeconds;
+        double earlyOffset = Enumerable.Range(1, 3).Average(OffsetSeconds);
+        double lateOffset = Enumerable.Range(samples.Count - 3, 3).Average(OffsetSeconds);
 
         Math.Abs(lateOffset - earlyOffset).ShouldBeLessThan(
             1.0,
             $"encoded time drifted from wall time by {(lateOffset - earlyOffset) * 1000:F0} ms " +
-            $"over {samples[^1].Elapsed - samples[1].Elapsed} " +
-            $"(offset {earlyOffset:F2}s → {lateOffset:F2}s)");
+            $"over {samples[^1].Elapsed - samples[1].Elapsed} (offset {earlyOffset:F2}s → {lateOffset:F2}s)");
 
         // --- Leak checks: compare a late sample window to an early one -----------
         double earlyHandles = samples.Take(3).Average(s => s.Handles);
@@ -88,25 +96,31 @@ public class SoakTests
         lateMb.ShouldBeLessThan(earlyMb + 100,
             $"managed memory grew {earlyMb:F0} MB → {lateMb:F0} MB — that trend is a leak");
 
-        // --- Finalise; every segment must verify, coverage must exceed 99.9% -----
-        // Release the journal writer first, as RecordingSession does in production
-        // before finalisation reopens it to append the terminal event.
-        session.Journal.Dispose();
-        string ffprobe = FfmpegLocator.FindFfprobe();
-        FinalizationResult result = await new FinalizationPipeline(FfmpegLocator.FindFfmpeg(), ffprobe, Logger.None)
-            .RunAsync(session.WorkingFolder, CancellationToken.None);
-
+        // --- Coverage, repairs, integrity, journal --------------------------------
         result.RepairedSegments.ShouldBe(0, "a clean soak must not need repairs");
         result.Coverage.Coverage.ShouldBeGreaterThan(0.999);
+        result.OutputFiles.ShouldNotBeEmpty();
 
-        IntegrityRecord record = IntegrityRecord.ReadOrNull(session.WorkingFolder).ShouldNotBeNull();
-        (await record.VerifyAsync(session.WorkingFolder, CancellationToken.None)).ShouldBeEmpty();
+        IntegrityRecord record = IntegrityRecord.ReadOrNull(context.WorkingFolder).ShouldNotBeNull();
+        (await record.VerifyAsync(context.WorkingFolder, CancellationToken.None)).ShouldBeEmpty();
 
-        // --- Journal internal consistency ----------------------------------------
-        IReadOnlyList<JournalEvent> events = session.ReadJournal();
+        IReadOnlyList<JournalEvent> events = SessionJournal.ReadAll(
+            Path.Combine(context.WorkingFolder, SessionJournal.FileName));
         events.OfType<SessionStarted>().ShouldHaveSingleItem();
         events.OfType<SessionFinalized>().ShouldHaveSingleItem();
         events.OfType<EncoderRestarted>().ShouldBeEmpty("a healthy soak has no restarts");
         events.OfType<GapRecorded>().ShouldBeEmpty("a healthy soak has no gaps");
+        events.OfType<SegmentOpened>().Count().ShouldBeGreaterThan(0);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
     }
 }

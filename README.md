@@ -29,9 +29,13 @@ Everything a build produces lands in `publish/` and `artifacts/` (installer,
 variables (`CAPTR_SIGN_PFX`, `CAPTR_SIGN_PFX_PASSWORD`) and the build succeeds
 unsigned with a loud warning when they are absent.
 
-Tests: `dotnet test --project tests/Captr.Core.Tests` runs everywhere;
-`tests/Captr.Integration.Tests` needs the fetched FFmpeg, and its `Display`/`Gpu`
-categories need a real desktop and GPU (`pwsh build/build.ps1 -Full`).
+Tests: `dotnet test --project tests/Captr.Core.Tests` runs everywhere.
+`tests/Captr.Integration.Tests` needs the fetched FFmpeg; its `Display`, `Gpu`,
+and `Soak` categories additionally need a real desktop and GPU, so they run only
+with `pwsh build/build.ps1 -Full` (set `CAPTR_SOAK_MINUTES` to lengthen the soak).
+Integration tests run sequentially on purpose — they share one machine-global
+recording host and one GPU. `docs/test-coverage.md` maps every spec test
+requirement to the test that covers it.
 
 ## Documentation
 
@@ -45,6 +49,16 @@ categories need a real desktop and GPU (`pwsh build/build.ps1 -Full`).
 | SharePoint destination setup and credential rotation | `docs/graph-setup.md` |
 | Bundled FFmpeg licence obligations and source offer | `docs/ffmpeg-source-offer.md` |
 | Release checklist incl. deferred clean-machine checks | `docs/release-verification.md` |
+
+## A tour in five commands
+
+```powershell
+captr version                     # exactly which build this is
+captr start --label morning       # begins recording every attached display
+captr status                      # state, elapsed, coverage, encoder, disk left
+captr stop                        # finalises and hands off to delivery
+captr recordings list             # what you have, and whether it was delivered
+```
 
 ## Where your data lives
 
