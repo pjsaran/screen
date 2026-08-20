@@ -16,6 +16,17 @@ Everything the UI can do is available here (SPEC §10). Every command supports
 
 ## Commands
 
+### Which build am I running?
+
+```
+captr version [--json]
+```
+
+Prints the application version, the source commit it was built from, the exact
+bundled FFmpeg build identifier, and the .NET runtime — the four facts a support
+conversation starts from (SPEC §11). The same block appears on the UI's
+Diagnostics page.
+
 ### Recording
 
 ```
@@ -41,11 +52,22 @@ captr status [--json]
 
 ```
 captr recordings list [--json]
-captr recordings verify <session-folder> [--json]
+captr recordings verify   <session-folder> [--json]
+captr recordings segments <session-folder> [--json]
+captr recordings clip     <session-folder> --from N --to M [--json]
+captr recordings resend    <session-folder> [--json]
 ```
 
-`verify` recomputes every SHA-256 against the session's integrity record, proving
-the footage is unaltered on disk (exit 1 with a list of problems otherwise).
+- `verify` recomputes every SHA-256 against the session's integrity record, proving
+  the footage is unaltered on disk (exit 1 with a list of problems otherwise).
+- `segments` lists the clip boundaries: segment number, offset from the start, and
+  length.
+- `clip` extracts segments N..M into a new file **by stream copy** — no
+  re-encoding, so it is near-instant and the picture is bit-identical to the
+  original. Clips cut only at segment boundaries; that is the unit of time the
+  format guarantees.
+- `resend` queues the recording's outputs to every enabled destination again,
+  for after a destination was fixed or added.
 
 ### Recovery
 
@@ -78,7 +100,15 @@ captr settings import captr-settings.json
 Keys: `frameRate`, `qualityPreset`, `qualityOverride`, `workingFolder`,
 `outputPattern`, `retentionDays`, `startMinimised`, `closeToTray`,
 `excludedDisplayIds` (semicolon-separated stable ids). All changes are validated
-before saving. Exports NEVER contain credentials, and say so in the file; import
+before saving.
+
+**While a recording is in progress**, capture and quality settings accept only
+*degrading* changes — a lower frame rate, a lower quality preset, or removing a
+display. Each is applied to the live recording, rolls a new segment, and is
+journaled. Raising quality or frame rate, adding a display back, or moving the
+working folder is refused with a message telling you to stop the recording first;
+settings that do not touch the encoder (naming, retention, hotkeys, cosmetics)
+change freely at any time. Exports NEVER contain credentials, and say so in the file; import
 leaves stored credentials untouched.
 
 ### Credentials

@@ -26,4 +26,10 @@ public interface IHostOperations
     Task<ListDeliveriesResponse> ListDeliveriesAsync(CancellationToken cancellationToken);
 
     Task<StateResponse> RetryDeliveryAsync(RetryDeliveryRequest request, CancellationToken cancellationToken);
+
+    Task<ResendResponse> ResendAsync(ResendRequest request, CancellationToken cancellationToken);
+
+    Task<ClipResponse> ClipAsync(ClipRequest request, CancellationToken cancellationToken);
+
+    Task<SetSettingsResponse> SetSettingsAsync(SetSettingsRequest request, CancellationToken cancellationToken);
 }

@@ -48,6 +48,11 @@ public sealed class HostRuntime
             // SPEC §6: recover interrupted sessions BEFORE accepting new work.
             await service.RunRecoveryScanAsync(cancellationToken).ConfigureAwait(false);
 
+            // SPEC §7: reclaim disk from sessions that are delivered, verified, and
+            // past their retention period. Host start is the natural moment — the
+            // machine is idle and nothing is recording yet.
+            new Delivery.RetentionCleaner(deliveryQueue, settingsStore, log).Clean(DateTimeOffset.UtcNow);
+
             using var deliveryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             Task deliveryTask = deliveryWorker.RunAsync(deliveryCts.Token);
 

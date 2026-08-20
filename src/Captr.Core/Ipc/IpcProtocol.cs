@@ -11,8 +11,13 @@ namespace Captr.Core.Ipc;
 /// </summary>
 public static class IpcProtocol
 {
-    /// <summary>Bump on ANY breaking change to messages or framing.</summary>
-    public const int Version = 1;
+    /// <summary>
+    /// Bump on ANY breaking change to messages or framing. History:
+    /// 1 — initial protocol.
+    /// 2 — StatusResponse gained live coverage (gap count + covered fraction);
+    ///     resend and clip messages added.
+    /// </summary>
+    public const int Version = 2;
 
     /// <summary>Envelopes larger than this are rejected — no legitimate message is
     /// near it, and a corrupt length prefix must not allocate gigabytes.</summary>
@@ -135,6 +140,9 @@ public static class IpcKinds
     public const string Recover = "recover";
     public const string ListDeliveries = "list-deliveries";
     public const string RetryDelivery = "retry-delivery";
+    public const string Resend = "resend";
+    public const string Clip = "clip";
+    public const string SetSettings = "set-settings";
 }
 
 public sealed record HelloRequest(int ProtocolVersion, string ClientVersion);
@@ -153,6 +161,11 @@ public sealed record StopResponse(bool WasRecording, string State);
 
 public sealed record StateResponse(string State, string Message);
 
+/// <summary>
+/// What the recorder is doing right now. <c>GapCount</c> and <c>Coverage</c> are
+/// the live coverage SPEC §9 requires the status view to show WHILE recording —
+/// holes are visible as they happen, not only after finalisation.
+/// </summary>
 public sealed record StatusResponse(
     string State,
     Guid? SessionId,
@@ -162,7 +175,9 @@ public sealed record StatusResponse(
     int? FrameRate,
     TimeSpan? EncodedTime,
     string? WorkingFolder,
-    double? DiskMinutesRemaining);
+    double? DiskMinutesRemaining,
+    int GapCount = 0,
+    double Coverage = 1.0);
 
 public sealed record RecordingSummary(
     string Folder,
@@ -194,3 +209,20 @@ public sealed record DeliverySummary(
 public sealed record ListDeliveriesResponse(IReadOnlyList<DeliverySummary> Deliveries);
 
 public sealed record RetryDeliveryRequest(long Id);
+
+/// <summary>Re-send a finished recording's outputs to every enabled destination
+/// (SPEC §9's "re-sending to a destination").</summary>
+public sealed record ResendRequest(string Folder);
+
+public sealed record ResendResponse(int Queued, string Message);
+
+/// <summary>Extract a clip by stream copy at segment boundaries (SPEC §9).</summary>
+public sealed record ClipRequest(string Folder, int FirstSegment, int LastSegment);
+
+public sealed record ClipResponse(string ClipPath, string Message);
+
+/// <summary>Save settings THROUGH the host, so the capture/quality lock of SPEC §8
+/// can be enforced against the live session.</summary>
+public sealed record SetSettingsRequest(Settings.CaptrSettings Settings);
+
+public sealed record SetSettingsResponse(bool Applied, bool DegradedLiveRecording, string Message);

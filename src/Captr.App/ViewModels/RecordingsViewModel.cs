@@ -77,6 +77,42 @@ public sealed partial class RecordingsViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    private async Task ResendAsync(RecordingRow row)
+    {
+        try
+        {
+            ResendResponse response = await _host.RequestAsync<ResendResponse>(
+                IpcKinds.Resend, new ResendRequest(row.Folder), startHostIfNeeded: true, CancellationToken.None);
+            row.ActionResult = response.Message;
+        }
+        catch (Exception exception) when (exception is HostUnreachableException or IpcRequestException)
+        {
+            row.ActionResult = exception.Message;
+        }
+    }
+
+    /// <summary>
+    /// Extracts a clip by stream copy (SPEC §9). Called by the view once the user
+    /// has chosen a segment range; the range comes from
+    /// <see cref="Captr.Core.Sessions.SegmentClipper.ListSegments"/>, so the
+    /// boundaries offered are always real ones.
+    /// </summary>
+    public async Task ExtractClipAsync(RecordingRow row, int firstSegment, int lastSegment)
+    {
+        try
+        {
+            ClipResponse response = await _host.RequestAsync<ClipResponse>(
+                IpcKinds.Clip, new ClipRequest(row.Folder, firstSegment, lastSegment),
+                startHostIfNeeded: true, CancellationToken.None);
+            row.ActionResult = response.Message;
+        }
+        catch (Exception exception) when (exception is HostUnreachableException or IpcRequestException)
+        {
+            row.ActionResult = exception.Message;
+        }
+    }
+
     /// <summary>Executes a deletion AFTER the view has collected the typed
     /// confirmation (SPEC §7: explicit typed confirmation, always).</summary>
     public async Task DeleteConfirmedAsync(RecordingRow row)
@@ -91,6 +127,10 @@ public sealed partial class RecordingRow : ObservableObject
 {
     [ObservableProperty]
     private string _verifyResult = "";
+
+    /// <summary>Outcome of the last clip or re-send on this row.</summary>
+    [ObservableProperty]
+    private string _actionResult = "";
 
     public RecordingRow(RecordingSummary summary)
     {

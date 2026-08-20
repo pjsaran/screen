@@ -54,4 +54,20 @@ public static class EncodingConstants
     /// process re-adoption (SPEC §4: "an identifying marker written into the
     /// encoder's own metadata").</summary>
     public const string SessionMetadataKey = "CAPTR_SESSION";
+
+    /// <summary>
+    /// Milliseconds of video per Matroska cluster. Smaller clusters are written out
+    /// more often, so a segment killed mid-write loses less recoverable footage —
+    /// the difference between what survives a host crash and what does not.
+    /// </summary>
+    /// <remarks>
+    /// MEASURED: FFmpeg writes file output through a 512 KB buffer that no
+    /// documented option removes (<c>-flush_packets</c>, <c>-avioflags direct</c>,
+    /// and <c>-blocksize</c> were all tried and changed nothing). Limiting cluster
+    /// duration to 2 s pushed 50% more bytes to disk before a kill in the same
+    /// test, because cluster boundaries force writes. The cost is a few extra
+    /// cluster headers per segment — nothing against the reliability gain, which is
+    /// design priority #1.
+    /// </remarks>
+    public const int ClusterTimeLimitMilliseconds = 2000;
 }

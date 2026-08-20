@@ -28,6 +28,8 @@ C:\work\s1\progress.txt
 segment
 -segment_format
 matroska
+-segment_format_options
+cluster_time_limit=2000
 -segment_time
 300
 -segment_atclocktime

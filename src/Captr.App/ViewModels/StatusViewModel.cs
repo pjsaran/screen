@@ -28,6 +28,9 @@ public sealed partial class StatusViewModel : ObservableObject
     private string _diskText = "";
 
     [ObservableProperty]
+    private string _coverageText = "";
+
+    [ObservableProperty]
     private string _degradationText = "";
 
     [ObservableProperty]
@@ -68,6 +71,15 @@ public sealed partial class StatusViewModel : ObservableObject
         DetailText = status.SessionId is null
             ? "Nothing is recording."
             : $"Elapsed {status.Elapsed:hh\\:mm\\:ss} · encoder {status.Encoder} · {status.FrameRate} fps";
+
+        // Coverage is shown WHILE recording, and says "continuous" only when it
+        // truly is (SPEC §6/§9).
+        CoverageText = status.SessionId is null
+            ? string.Empty
+            : status.GapCount == 0
+                ? "Coverage: continuous — no gaps so far"
+                : string.Create(System.Globalization.CultureInfo.CurrentCulture,
+                    $"Coverage: {status.Coverage:P1} — {status.GapCount} gap(s) recorded");
 
         DiskText = status.DiskMinutesRemaining is { } minutes
             ? $"Disk: about {minutes:F0} minutes of recording space left"

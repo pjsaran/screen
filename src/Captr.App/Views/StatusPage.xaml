@@ -8,6 +8,7 @@
         <StackPanel Margin="24" MaxWidth="900">
             <TextBlock Text="{Binding StateText}" FontSize="28" FontWeight="SemiBold" />
             <TextBlock Text="{Binding DetailText}" Margin="0,4,0,0" Opacity="0.8" />
+            <TextBlock Text="{Binding CoverageText}" Margin="0,4,0,0" Opacity="0.8" />
             <TextBlock Text="{Binding DiskText}" Margin="0,4,0,0" Opacity="0.8" />
             <TextBlock Text="{Binding DegradationText}" Margin="0,8,0,0" Foreground="Orange" FontWeight="SemiBold"
                        TextWrapping="Wrap" />

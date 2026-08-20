@@ -1,0 +1,18 @@
+{
+  "$schema": "https://xunit.net/schema/current/xunit.runner.schema.json",
+
+  "//": [
+    "Integration tests run SEQUENTIALLY, deliberately. They contend for genuinely",
+    "global, single-instance resources: one recording host per user (by design —",
+    "SPEC §4), one set of GPU encoders, one desktop to duplicate, one settings file.",
+    "Run in parallel they sabotage each other in ways that LOOK like product bugs:",
+    "one test's stray-host cleanup kills the host another test just started, and GPU",
+    "contention makes the soak test's encoder fall behind wall-clock time. Both were",
+    "observed before this setting existed. Parallelism saves a couple of minutes and",
+    "costs trustworthy results — a bad trade for the suite that guards the",
+    "reliability claims."
+  ],
+
+  "parallelizeTestCollections": false,
+  "parallelizeAssembly": false
+}

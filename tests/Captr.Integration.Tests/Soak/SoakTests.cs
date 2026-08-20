@@ -59,14 +59,23 @@ public class SoakTests
 
         // --- Timestamp DRIFT: does the wall-vs-encoded offset GROW? --------------
         // Not the absolute difference: a fixed offset is just startup latency
-        // (device open, first frame). Drift is that offset changing over time —
+        // (device open, first frame). Drift is that offset CHANGING over time,
         // which is what makes a long recording's timeline untrustworthy.
-        TimeSpan earlyOffset = samples[1].Elapsed - samples[1].Encoded;
-        TimeSpan lateOffset = samples[^1].Elapsed - samples[^1].Encoded;
-        (lateOffset - earlyOffset).Duration().ShouldBeLessThan(
-            TimeSpan.FromSeconds(1),
-            $"encoded time drifted from wall time by {(lateOffset - earlyOffset).TotalMilliseconds:F0} ms " +
-            $"over {samples[^1].Elapsed - samples[1].Elapsed}");
+        //
+        // Averaged over several samples at each end, because a single sample
+        // carries up to ~0.75 s of measurement jitter on its own (FFmpeg writes a
+        // progress block roughly twice a second and the tailer polls every 250 ms).
+        // Comparing two lone samples would put ±1.5 s of noise against a 1 s bar —
+        // the assertion would be measuring the clock of the test, not the product.
+        double EarlyOffsetSeconds(int index) => (samples[index].Elapsed - samples[index].Encoded).TotalSeconds;
+        double earlyOffset = Enumerable.Range(1, 3).Average(EarlyOffsetSeconds);
+        double lateOffset = Enumerable.Range(samples.Count - 3, 3).Average(EarlyOffsetSeconds);
+
+        Math.Abs(lateOffset - earlyOffset).ShouldBeLessThan(
+            1.0,
+            $"encoded time drifted from wall time by {(lateOffset - earlyOffset) * 1000:F0} ms " +
+            $"over {samples[^1].Elapsed - samples[1].Elapsed} " +
+            $"(offset {earlyOffset:F2}s → {lateOffset:F2}s)");
 
         // --- Leak checks: compare a late sample window to an early one -----------
         double earlyHandles = samples.Take(3).Average(s => s.Handles);

@@ -17,6 +17,10 @@ public sealed partial class DiagnosticsViewModel : ObservableObject
     [ObservableProperty]
     private string _message = "";
 
+    /// <summary>Exactly which build this installation is (SPEC §11) — the first
+    /// thing any support conversation needs.</summary>
+    public string BuildIdentity { get; } = Captr.Core.Common.BuildInfo.Current().ToDisplayText();
+
     private static string LogFolder => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Captr", "logs");
 

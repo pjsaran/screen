@@ -41,7 +41,7 @@ public partial class MainWindow
             new StatusPage(_statusViewModel),
             new RecordingsPage(new RecordingsViewModel(host)),
             new DeliveryPage(new DeliveryViewModel(host)),
-            new SettingsPage(new SettingsViewModel()),
+            new SettingsPage(new SettingsViewModel(host)),
             new DiagnosticsPage(new DiagnosticsViewModel()),
         ];
         PageHost.Navigate(_pages[0]);

@@ -38,6 +38,7 @@ categories need a real desktop and GPU (`pwsh build/build.ps1 -Full`).
 | Topic | Where |
 |---|---|
 | How the whole thing fits together | `ARCHITECTURE.md` (then per-folder READMEs) |
+| What each spec test requirement is covered by | `docs/test-coverage.md` |
 | Install / silent install / upgrade / uninstall | `docs/install.md` |
 | Scheduled recording (read the session-0 warning!) | `docs/task-scheduler.md` |
 | Command-line reference and exit codes | `docs/cli.md` |

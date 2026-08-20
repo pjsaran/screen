@@ -32,6 +32,7 @@
                                 <Run Text="{Binding State, Mode=OneWay}" />
                             </TextBlock>
                             <TextBlock Text="{Binding VerifyResult}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ActionResult}" Margin="0,4,0,0" TextWrapping="Wrap" Opacity="0.85" />
                             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                 <ui:Button Content="Open folder" FontSize="12"
                                            Command="{Binding DataContext.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=Page}}"
@@ -41,6 +42,11 @@
                                            CommandParameter="{Binding}" />
                                 <ui:Button Content="Verify" FontSize="12" Margin="8,0,0,0"
                                            Command="{Binding DataContext.VerifyCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                           CommandParameter="{Binding}" />
+                                <ui:Button Content="Extract clip…" FontSize="12" Margin="8,0,0,0"
+                                           Click="OnClipClicked" Tag="{Binding}" />
+                                <ui:Button Content="Re-send" FontSize="12" Margin="8,0,0,0"
+                                           Command="{Binding DataContext.ResendCommand, RelativeSource={RelativeSource AncestorType=Page}}"
                                            CommandParameter="{Binding}" />
                                 <ui:Button Content="Delete…" FontSize="12" Margin="8,0,0,0" Appearance="Danger"
                                            Click="OnDeleteClicked" Tag="{Binding}" />

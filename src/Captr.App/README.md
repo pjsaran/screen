@@ -19,7 +19,11 @@ killed, or relaunched mid-recording with no effect on capture. Concretely:
   in-process one-shot DXGI duplication — the capture path the spec permits for
   preview ONLY, allowed to fail without consequence. Never GDI.
 - Pages (`Views/` + `ViewModels/`, MVVM via CommunityToolkit): Status,
-  Recordings, Delivery, Settings, Diagnostics.
+  Recordings, Delivery, Settings, Diagnostics. The Recordings page offers open,
+  play, verify, **extract clip** (segment-boundary stream copy, via
+  `ClipRangeWindow`), **re-send**, and delete-with-typed-confirmation.
+  Diagnostics shows the exact build identity (SPEC §11) and exports the support
+  bundle.
 - `TrayIcon` keeps state unmistakable (idle/recording/paused/error icons +
   tooltip); closing the window hides here; quitting while recording asks first
   and defaults to keep recording (SPEC §9).

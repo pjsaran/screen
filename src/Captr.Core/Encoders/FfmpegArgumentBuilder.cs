@@ -60,6 +60,10 @@ public static class FfmpegArgumentBuilder
             // the concat joiner can re-time them (SPEC §6).
             "-f", "segment",
             "-segment_format", "matroska",
+            // Passed through to the inner Matroska muxer: shorter clusters mean
+            // more frequent writes, so a crash loses less (see the constant).
+            "-segment_format_options",
+            FormattableString.Invariant($"cluster_time_limit={EncodingConstants.ClusterTimeLimitMilliseconds}"),
             "-segment_time", segmentSeconds.ToString(CultureInfo.InvariantCulture),
             "-segment_atclocktime", "1",
             "-reset_timestamps", "1",

@@ -56,8 +56,25 @@ public static class CliApplication
         root.Subcommands.Add(BuildSettings(jsonOption));
         root.Subcommands.Add(BuildDelivery(jsonOption));
         root.Subcommands.Add(BuildAuth());
+        root.Subcommands.Add(BuildVersion(jsonOption));
 
-        return await root.Parse(args).InvokeAsync();
+        ParseResult parseResult = root.Parse(args);
+
+        // Honour our own documented contract (docs/cli.md): a usage error exits 2.
+        // System.CommandLine's default for parse failures is 1, which would make a
+        // typo indistinguishable from a real recording failure in a scheduled task.
+        if (parseResult.Errors.Count > 0)
+        {
+            foreach (System.CommandLine.Parsing.ParseError error in parseResult.Errors)
+            {
+                await Console.Error.WriteLineAsync(error.Message);
+            }
+
+            await Console.Error.WriteLineAsync("Run 'captr --help' for usage.");
+            return ExitCodes.Usage;
+        }
+
+        return await parseResult.InvokeAsync();
     }
 
     // ---- start ------------------------------------------------------------------
@@ -107,12 +124,19 @@ public static class CliApplication
                 ? new StatusResponse("idle", null, null, null, null, null, null, null, null)
                 : await client.RequestAsync<StatusResponse>(IpcKinds.Status, null, cancellationToken);
 
+            // Coverage is stated honestly and always — "continuous" only when it
+            // genuinely is (SPEC §6: never present a recording as continuous when
+            // it isn't).
+            string coverage = status.GapCount == 0
+                ? "continuous"
+                : FormattableString.Invariant($"{status.GapCount} gap(s), {status.Coverage:P1} covered");
+
             string human = status.State switch
             {
                 "idle" => "Idle — nothing is recording.",
-                "paused" => $"Paused (session {status.SessionId:N}, elapsed {status.Elapsed:hh\\:mm\\:ss}). Don't forget to resume.",
+                "paused" => $"Paused (session {status.SessionId:N}, elapsed {status.Elapsed:hh\\:mm\\:ss}, {coverage}). Don't forget to resume.",
                 _ => $"{status.State} — session {status.SessionId:N}, elapsed {status.Elapsed:hh\\:mm\\:ss}, " +
-                     $"encoder {status.Encoder}, {status.FrameRate} fps" +
+                     $"{coverage}, encoder {status.Encoder}, {status.FrameRate} fps" +
                      (status.DiskMinutesRemaining is { } minutes ? $", ~{minutes:F0} min of disk left" : string.Empty),
             };
             Emit(json, status, human);
@@ -164,6 +188,67 @@ public static class CliApplication
             return response.Intact ? ExitCodes.Success : ExitCodes.Error;
         });
         command.Subcommands.Add(verify);
+
+        // --- clip: stream-copy extraction at segment boundaries (SPEC §9) --------
+        var clipFolder = new Argument<string>("folder") { Description = "The session's working folder." };
+        var fromOption = new Option<int>("--from") { Description = "First segment number (1-based).", Required = true };
+        var toOption = new Option<int>("--to") { Description = "Last segment number (inclusive).", Required = true };
+        var clip = new Command("clip",
+            "Extract part of a recording by stream copy at segment boundaries — no re-encoding, so the picture is untouched.");
+        clip.Arguments.Add(clipFolder);
+        clip.Options.Add(fromOption);
+        clip.Options.Add(toOption);
+        clip.Options.Add(jsonOption);
+        clip.SetAction(async (parseResult, cancellationToken) =>
+        {
+            bool json = parseResult.GetValue(jsonOption);
+            return await WithHostAsync(startHostIfNeeded: true, json, async client =>
+            {
+                ClipResponse response = await client.RequestAsync<ClipResponse>(
+                    IpcKinds.Clip,
+                    new ClipRequest(parseResult.GetValue(clipFolder)!, parseResult.GetValue(fromOption), parseResult.GetValue(toOption)),
+                    cancellationToken);
+                Emit(json, response, response.Message);
+                return ExitCodes.Success;
+            }, cancellationToken);
+        });
+        command.Subcommands.Add(clip);
+
+        // --- segments: what can be clipped ---------------------------------------
+        var segmentsFolder = new Argument<string>("folder") { Description = "The session's working folder." };
+        var segments = new Command("segments", "List a recording's segments — the boundaries a clip can start and end on.");
+        segments.Arguments.Add(segmentsFolder);
+        segments.Options.Add(jsonOption);
+        segments.SetAction(async (parseResult, cancellationToken) =>
+        {
+            bool json = parseResult.GetValue(jsonOption);
+            IReadOnlyList<ClipCandidate> candidates = SegmentClipper.ListSegments(parseResult.GetValue(segmentsFolder)!);
+            string human = candidates.Count == 0
+                ? "No segments found (is this a finalised session folder?)."
+                : string.Join(Environment.NewLine, candidates.Select(c =>
+                    $"{c.Index,3}  starts {c.StartOffset:hh\\:mm\\:ss}  lasts {c.Duration:hh\\:mm\\:ss}  {c.FileName}"));
+            Emit(json, candidates, human);
+            return await Task.FromResult(candidates.Count == 0 ? ExitCodes.Error : ExitCodes.Success);
+        });
+        command.Subcommands.Add(segments);
+
+        // --- resend: queue the outputs to every enabled destination (SPEC §9) ----
+        var resendFolder = new Argument<string>("folder") { Description = "The session's working folder." };
+        var resend = new Command("resend", "Send a finished recording to every enabled destination again.");
+        resend.Arguments.Add(resendFolder);
+        resend.Options.Add(jsonOption);
+        resend.SetAction(async (parseResult, cancellationToken) =>
+        {
+            bool json = parseResult.GetValue(jsonOption);
+            return await WithHostAsync(startHostIfNeeded: true, json, async client =>
+            {
+                ResendResponse response = await client.RequestAsync<ResendResponse>(
+                    IpcKinds.Resend, new ResendRequest(parseResult.GetValue(resendFolder)!), cancellationToken);
+                Emit(json, response, response.Message);
+                return response.Queued > 0 ? ExitCodes.Success : ExitCodes.Error;
+            }, cancellationToken);
+        });
+        command.Subcommands.Add(resend);
 
         return command;
     }
@@ -220,11 +305,34 @@ public static class CliApplication
             {
                 var store = new SettingsStore();
                 CaptrSettings updated = SettingsEditor.Apply(store.Load(), parseResult.GetValue(keyArgument)!, parseResult.GetValue(valueArgument)!);
-                store.Save(updated);
-                await Console.Out.WriteLineAsync("Saved.");
+
+                // Route through the host WHEN ONE IS RUNNING so the capture/quality
+                // lock of SPEC §8 is enforced against the live session. With no host
+                // there is no recording, so writing directly is equivalent — and it
+                // keeps `captr settings set` working on a machine that has never
+                // recorded (no host is summoned just to change a setting).
+                await using IpcClient? client = await IpcClient.ConnectAsync(
+                    ClientVersion(), startHostIfNeeded: false, null, cancellationToken);
+                if (client is null)
+                {
+                    store.Save(updated);
+                    await Console.Out.WriteLineAsync("Saved.");
+                    return ExitCodes.Success;
+                }
+
+                SetSettingsResponse response = await client.RequestAsync<SetSettingsResponse>(
+                    IpcKinds.SetSettings, new SetSettingsRequest(updated), cancellationToken);
+                if (!response.Applied)
+                {
+                    await Console.Error.WriteLineAsync(response.Message);
+                    return ExitCodes.Error;
+                }
+
+                await Console.Out.WriteLineAsync(response.Message);
                 return ExitCodes.Success;
             }
-            catch (Exception exception) when (exception is SettingsValidationException or ArgumentException)
+            catch (Exception exception) when (
+                exception is SettingsValidationException or ArgumentException or IpcRequestException or HostUnreachableException)
             {
                 await Console.Error.WriteLineAsync(exception.Message);
                 return ExitCodes.Error;
@@ -261,6 +369,31 @@ public static class CliApplication
         });
         command.Subcommands.Add(import);
 
+        return command;
+    }
+
+    // ---- version ----------------------------------------------------------------
+
+    private static Command BuildVersion(Option<bool> jsonOption)
+    {
+        var command = new Command(
+            "version",
+            "Show exactly which build this is: version, source commit, bundled FFmpeg build, and .NET runtime.");
+        command.Options.Add(jsonOption);
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            Captr.Core.Common.BuildInfo info = Captr.Core.Common.BuildInfo.Current();
+            if (parseResult.GetValue(jsonOption))
+            {
+                await Console.Out.WriteLineAsync(JsonSerializer.Serialize(info, JsonOptions));
+            }
+            else
+            {
+                await Console.Out.WriteLineAsync(info.ToDisplayText());
+            }
+
+            return ExitCodes.Success;
+        });
         return command;
     }
 

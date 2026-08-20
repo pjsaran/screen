@@ -161,7 +161,7 @@ public sealed class SessionPlanner
 
         var context = new RecordingSession.SessionContext(
             sessionId, workingFolder, ffmpegPath, ffprobePath, plan, fallback,
-            estimate.BytesPerHour, settings.ExcludedDisplayIds);
+            estimate.BytesPerHour, settings.ExcludedDisplayIds, preset.Name);
 
         return (context, startEvent);
     }

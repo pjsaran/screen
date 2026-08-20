@@ -6,6 +6,11 @@
     Title="Diagnostics">
     <StackPanel Margin="24" MaxWidth="640" HorizontalAlignment="Left">
         <TextBlock Text="Diagnostics" FontSize="24" FontWeight="SemiBold" />
+
+        <TextBlock Text="About this installation" FontWeight="SemiBold" Margin="0,16,0,4" />
+        <Border Padding="12" CornerRadius="8" Background="{DynamicResource ControlFillColorDefaultBrush}">
+            <TextBlock Text="{Binding BuildIdentity}" FontFamily="Consolas" FontSize="12" />
+        </Border>
         <TextBlock Margin="0,12,0,0" TextWrapping="Wrap"
                    Text="The support bundle contains the session journals, application logs, integrity records, encoder log tails, and system information. It contains no video content and no secrets." />
         <StackPanel Orientation="Horizontal" Margin="0,16,0,0">

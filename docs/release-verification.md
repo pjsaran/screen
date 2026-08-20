@@ -5,6 +5,9 @@ automatically and what needs a human with real machines. Items marked ☐ are th
 deferred checks for environments this repository's development machine cannot
 provide (clean VMs, a real code-signing certificate, a real Microsoft 365 tenant).
 
+`docs/test-coverage.md` maps every SPEC §14 requirement to the test that covers it,
+and names each deferred item — read it alongside this checklist.
+
 ## Automated (every release build)
 
 - [x] `build/build.ps1`: formatting verified, warnings-as-errors build, unit +

@@ -31,12 +31,18 @@ public sealed class RecordingSession
     private int _arrangementGroup = 1;
     private volatile SessionState _state = SessionState.Starting;
 
+    /// <summary>Settings handed to <see cref="ApplyDegradation"/>, consumed by the
+    /// command loop so the change lands between encoder runs rather than under one.</summary>
+    private Settings.CaptrSettings? _pendingDegradation;
+
     private RecordingSession(SessionContext context, SessionJournal journal, DiskGuard diskGuard, ILogger log)
     {
         _context = context;
         _journal = journal;
         _diskGuard = diskGuard;
         _plan = context.InitialPlan;
+        CurrentQualityPreset = context.QualityPresetName;
+        CurrentExcludedDisplayIds = context.ExcludedDisplayIds;
         _log = log.ForContext<RecordingSession>();
         _supervisor = new EncoderSupervisor(context.FfmpegPath, journal, log);
         _supervisor.SustainedSlowEncoding += () => Post(SessionCommand.ReduceFrameRate);
@@ -51,6 +57,21 @@ public sealed class RecordingSession
     /// <summary>The session's identity and immutable start facts.</summary>
     public SessionContext Context => _context;
 
+    /// <summary>
+    /// What the session is ACTUALLY running at right now — which can be below the
+    /// saved settings, because sustained slow encoding lowers the frame rate by
+    /// itself. The settings lock (SPEC §8) compares against these, not against the
+    /// settings file: otherwise, after an automatic reduction from 15 to 10 fps, a
+    /// user setting 12 would look like a "decrease" and quietly raise the load.
+    /// </summary>
+    public int CurrentFrameRate => _plan.FrameRate;
+
+    /// <inheritdoc cref="CurrentFrameRate"/>
+    public string CurrentQualityPreset { get; private set; }
+
+    /// <inheritdoc cref="CurrentFrameRate"/>
+    public IReadOnlyList<string> CurrentExcludedDisplayIds { get; private set; }
+
     /// <summary>Everything a session needs at birth; produced by
     /// <see cref="SessionPlanner"/> which validates settings, resolves displays,
     /// selects the encoder, and preflights the disk BEFORE any state is created.</summary>
@@ -62,7 +83,8 @@ public sealed class RecordingSession
         RecordingPlan InitialPlan,
         IReadOnlyList<string>? SoftwareFallbackArguments,
         long MeasuredBytesPerHour,
-        IReadOnlyList<string> ExcludedDisplayIds);
+        IReadOnlyList<string> ExcludedDisplayIds,
+        string QualityPresetName);
 
     /// <summary>Creates the session: journal, ballast, initial state. The caller
     /// (host) then invokes <see cref="RunAsync"/> exactly once.</summary>
@@ -78,6 +100,20 @@ public sealed class RecordingSession
     // ---- Commands (safe from any thread; the loop serialises them) --------------
 
     public void RequestStop() => Post(SessionCommand.Stop);
+
+    /// <summary>
+    /// Applies a permitted degrading settings change to the LIVE session (SPEC §8):
+    /// a lower frame rate, a lower quality preset, or fewer displays. The change
+    /// rolls a new segment and is journaled, because none of these are join-
+    /// compatible with what came before. Validation belongs to
+    /// <see cref="Settings.SettingsChangePolicy"/>; by the time this is called the
+    /// change is already known to be a degradation.
+    /// </summary>
+    public void ApplyDegradation(Settings.CaptrSettings degraded)
+    {
+        _pendingDegradation = degraded;
+        Post(SessionCommand.ApplyDegradation);
+    }
 
     public void RequestPause() => Post(SessionCommand.Pause);
 
@@ -172,6 +208,10 @@ public sealed class RecordingSession
                     case SessionCommand.ReduceFrameRate:
                         ReduceFrameRate();
                         break;
+
+                    case SessionCommand.ApplyDegradation:
+                        ApplyPendingDegradation();
+                        break;
                 }
             }
         }
@@ -254,8 +294,8 @@ public sealed class RecordingSession
                 case SessionCommand.Resume:
                     break; // Not paused — nothing to resume.
                 default:
-                    // Stop, Pause, Suspend, TopologyChanged, ReduceFrameRate all
-                    // need the encoder stopped first.
+                    // Stop, Pause, Suspend, TopologyChanged, ReduceFrameRate, and
+                    // ApplyDegradation all need the encoder stopped first.
                     ApplyPreCancelState(command);
                     await runCts.CancelAsync().ConfigureAwait(false);
                     return command;
@@ -368,6 +408,64 @@ public sealed class RecordingSession
         _log.Information("Display topology changed; continuing under arrangement group {Group}", _arrangementGroup);
     }
 
+    /// <summary>
+    /// Rebuilds the plan from a user's degrading settings change: fewer frames per
+    /// second, a softer quality preset, or fewer displays. Each of these makes the
+    /// following segments join-incompatible with the preceding ones, so the change
+    /// opens a NEW arrangement group and is journaled (SPEC §8).
+    /// </summary>
+    private void ApplyPendingDegradation()
+    {
+        if (_pendingDegradation is not { } degraded)
+        {
+            return;
+        }
+
+        _pendingDegradation = null;
+        int oldFps = _plan.FrameRate;
+        _arrangementGroup++;
+
+        // Displays: re-resolve against the NEW exclusion set. Removing a display
+        // changes the canvas, which is why this rolls a group.
+        IReadOnlyList<DisplayInfo> attached = new DisplayEnumerator().Enumerate();
+        ResolvedSelection selection = DisplaySelection.Resolve(attached, degraded.ExcludedDisplayIds, []);
+        IReadOnlyList<CaptureSource> sources = selection.Included.Count > 0
+            ? [.. selection.Included.Select(d => new CaptureSource(d.DxgiOutputIndex, d.Width, d.Height))]
+            : _plan.Sources; // Never leave a session with nothing to capture.
+
+        // Quality: rebuild the encoder's arguments for the SAME encoder at the new
+        // preset — the proven encoder stays proven.
+        ArrangementPlan arrangement = ArrangementPlanner.Plan(sources);
+        QualityPreset preset = QualityPresets.Find(degraded.QualityPreset)
+            ?? QualityPresets.Find(QualityPresets.DefaultName)!;
+        var encoder = new EncoderSettings(
+            _plan.Encoder.CodecName,
+            QualityPresets.BuildQualityArguments(
+                _plan.Encoder.CodecName, preset, degraded.QualityOverride,
+                arrangement.CanvasWidth, arrangement.CanvasHeight, degraded.FrameRate));
+
+        _plan = _plan with { FrameRate = degraded.FrameRate, Sources = sources, Encoder = encoder };
+        CurrentQualityPreset = preset.Name;
+        CurrentExcludedDisplayIds = degraded.ExcludedDisplayIds;
+
+        if (degraded.FrameRate != oldFps)
+        {
+            _journal.Append(new FrameRateReduced
+            {
+                TimestampUtc = DateTimeOffset.UtcNow,
+                FromFps = oldFps,
+                ToFps = degraded.FrameRate,
+                Reason = "user lowered the frame rate while recording",
+            });
+        }
+
+        Note($"Settings degraded while recording: {sources.Count} display(s), {degraded.FrameRate} fps, " +
+             $"quality '{preset.Name}'. Continuing under arrangement group {_arrangementGroup}.");
+        _log.Information(
+            "Applied a degrading settings change: {Displays} display(s), {Fps} fps, quality {Preset}; group {Group}",
+            sources.Count, degraded.FrameRate, preset.Name, _arrangementGroup);
+    }
+
     private void ReduceFrameRate()
     {
         int oldFps = _plan.FrameRate;
@@ -455,6 +553,7 @@ public sealed class RecordingSession
         ResumeFromSuspend,
         TopologyChanged,
         ReduceFrameRate,
+        ApplyDegradation,
         ClockChanged,
         NoteLocked,
         NoteUnlocked,

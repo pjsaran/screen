@@ -149,6 +149,15 @@ public sealed class IpcServer : IAsyncDisposable
                     await _operations.ListDeliveriesAsync(cancellationToken).ConfigureAwait(false)),
                 IpcKinds.RetryDelivery => IpcProtocol.Envelope(IpcKinds.RetryDelivery,
                     await _operations.RetryDeliveryAsync(envelope.PayloadAs<RetryDeliveryRequest>() ?? new RetryDeliveryRequest(0), cancellationToken).ConfigureAwait(false)),
+                IpcKinds.Resend => IpcProtocol.Envelope(IpcKinds.Resend,
+                    await _operations.ResendAsync(envelope.PayloadAs<ResendRequest>() ?? new ResendRequest(""), cancellationToken).ConfigureAwait(false)),
+                IpcKinds.Clip => IpcProtocol.Envelope(IpcKinds.Clip,
+                    await _operations.ClipAsync(envelope.PayloadAs<ClipRequest>() ?? new ClipRequest("", 1, 1), cancellationToken).ConfigureAwait(false)),
+                IpcKinds.SetSettings => IpcProtocol.Envelope(IpcKinds.SetSettings,
+                    await _operations.SetSettingsAsync(
+                        envelope.PayloadAs<SetSettingsRequest>()
+                        ?? throw new InvalidOperationException("set-settings requires a settings payload."),
+                        cancellationToken).ConfigureAwait(false)),
 
                 // Unknown kinds are ANSWERED, never fatal (SPEC §14): a newer
                 // client's new feature degrades to an error message, not a hang.

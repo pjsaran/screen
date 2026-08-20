@@ -19,6 +19,20 @@ public partial class RecordingsPage : Page
         Loaded += async (_, _) => await _viewModel.RefreshAsync();
     }
 
+    private async void OnClipClicked(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not RecordingRow row)
+        {
+            return;
+        }
+
+        var dialog = new ClipRangeWindow(row.Folder) { Owner = Window.GetWindow(this) };
+        if (dialog.ShowDialog() == true)
+        {
+            await _viewModel.ExtractClipAsync(row, dialog.FirstSegment, dialog.LastSegment);
+        }
+    }
+
     private async void OnDeleteClicked(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.Tag is not RecordingRow row)

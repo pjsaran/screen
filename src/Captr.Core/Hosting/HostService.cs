@@ -164,6 +164,7 @@ public sealed class HostService : IHostOperations
 
         EncoderProgress? progress = session.LatestProgress;
         RecordingPlanSummary plan = SummarisePlan(session);
+        (int gapCount, double coverage) = LiveCoverage(session);
         return Task.FromResult(new StatusResponse(
             session.State.ToString().ToLowerInvariant(),
             session.Context.SessionId,
@@ -173,7 +174,9 @@ public sealed class HostService : IHostOperations
             plan.FrameRate,
             progress?.OutTime,
             session.Context.WorkingFolder,
-            DiskMinutes(session)));
+            DiskMinutes(session),
+            gapCount,
+            coverage));
     }
 
     public Task<ListRecordingsResponse> ListRecordingsAsync(CancellationToken cancellationToken)
@@ -275,6 +278,109 @@ public sealed class HostService : IHostOperations
     }
 
     /// <summary>
+    /// Saves settings, enforcing the SPEC §8 lock: while a recording is running,
+    /// only degrading capture/quality changes are accepted, and an accepted
+    /// degradation is applied to the live session (rolling a new segment, journaled).
+    /// Everything unrelated to the encoder saves freely at any time.
+    /// </summary>
+    public Task<SetSettingsResponse> SetSettingsAsync(SetSettingsRequest request, CancellationToken cancellationToken)
+    {
+        Touch();
+        CaptrSettings current = _settingsStore.Load();
+        RecordingSession? session = ActiveSession();
+
+        if (session is null)
+        {
+            _settingsStore.Save(request.Settings);
+            return Task.FromResult(new SetSettingsResponse(true, false, "Saved."));
+        }
+
+        // Compare against what the session is ACTUALLY running at, not against the
+        // settings file — automatic frame-rate reduction may already have taken the
+        // live session below the saved value.
+        CaptrSettings live = current with
+        {
+            FrameRate = session.CurrentFrameRate,
+            QualityPreset = session.CurrentQualityPreset,
+            ExcludedDisplayIds = session.CurrentExcludedDisplayIds,
+        };
+
+        SettingsChangeVerdict verdict = SettingsChangePolicy.Evaluate(live, request.Settings);
+        if (!verdict.Allowed)
+        {
+            return Task.FromResult(new SetSettingsResponse(false, false, verdict.RejectionMessage));
+        }
+
+        _settingsStore.Save(request.Settings);
+
+        if (!verdict.DegradesRecording)
+        {
+            return Task.FromResult(new SetSettingsResponse(true, false,
+                "Saved. The running recording is unaffected."));
+        }
+
+        session.ApplyDegradation(request.Settings);
+        _log.Information("Degrading settings change applied to the running session");
+        return Task.FromResult(new SetSettingsResponse(true, true,
+            "Saved and applied to the running recording, which rolled a new segment. The change is journaled."));
+    }
+
+    public Task<ResendResponse> ResendAsync(ResendRequest request, CancellationToken cancellationToken)
+    {
+        Touch();
+
+        // Re-send the session's OUTPUTS (not its raw segments) to every enabled
+        // destination — SPEC §9's "re-sending to a destination", used after a
+        // destination was fixed, added, or its transfer was abandoned.
+        IntegrityRecord? record = IntegrityRecord.ReadOrNull(request.Folder);
+        if (record is null)
+        {
+            return Task.FromResult(new ResendResponse(0,
+                $"No integrity record in {request.Folder} — only a finalised recording can be re-sent."));
+        }
+
+        List<DestinationSettings> destinations =
+            [.. _settingsStore.Load().Destinations.Where(d => d.Enabled)];
+        if (destinations.Count == 0)
+        {
+            return Task.FromResult(new ResendResponse(0, "No destinations are enabled, so there is nowhere to send."));
+        }
+
+        int queued = 0;
+        foreach (HashedFile output in record.Outputs)
+        {
+            string path = Path.Combine(request.Folder, output.FileName);
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            foreach (DestinationSettings destination in destinations)
+            {
+                _deliveryQueue.Enqueue(path, destination.Name);
+                queued++;
+            }
+        }
+
+        _log.Information("Re-send queued {Count} transfer(s) for {Folder}", queued, request.Folder);
+        return Task.FromResult(new ResendResponse(queued,
+            queued == 0
+                ? "Nothing to re-send — the output files are no longer in the working folder."
+                : $"Queued {queued} transfer(s) across {destinations.Count} destination(s)."));
+    }
+
+    public async Task<ClipResponse> ClipAsync(ClipRequest request, CancellationToken cancellationToken)
+    {
+        Touch();
+        var clipper = new SegmentClipper(FfmpegLocator.FindFfmpeg(), FfmpegLocator.FindFfprobe(), _log);
+        string clipPath = await clipper
+            .ExtractAsync(request.Folder, request.FirstSegment, request.LastSegment, cancellationToken)
+            .ConfigureAwait(false);
+        return new ClipResponse(clipPath,
+            $"Clip written to {clipPath} (stream copy — no re-encoding, so the picture is untouched).");
+    }
+
+    /// <summary>
     /// The stop-side hand-off (SPEC §7): rename each finalised output by the user's
     /// pattern (sanitised, collision-suffixed — within the working folder, so
     /// nothing leaves it) and enqueue one delivery per enabled destination.
@@ -358,6 +464,30 @@ public sealed class HostService : IHostOperations
             Path.Combine(session.Context.WorkingFolder, SessionJournal.FileName));
         SessionStarted start = events.OfType<SessionStarted>().First();
         return new RecordingPlanSummary(start.TimestampUtc, start.EncoderName, start.FrameRate);
+    }
+
+    /// <summary>
+    /// Coverage of the session SO FAR (SPEC §9: the status view shows coverage
+    /// including any gaps while recording, not only afterwards). Computed from the
+    /// live journal with "now" as the end of the observation window — the same
+    /// arithmetic finalisation will apply, so the number the user watches is the
+    /// number they get.
+    /// </summary>
+    private static (int GapCount, double Coverage) LiveCoverage(RecordingSession session)
+    {
+        try
+        {
+            IReadOnlyList<JournalEvent> events = SessionJournal.ReadAll(
+                Path.Combine(session.Context.WorkingFolder, SessionJournal.FileName));
+            CoverageReport report = CoverageCalculator.Compute(events, DateTimeOffset.UtcNow);
+            return (report.GapCount, report.Coverage);
+        }
+        catch (Exception exception) when (exception is IOException or ArgumentException)
+        {
+            // A status query must never fail because the journal was momentarily
+            // unreadable; report the optimistic default and move on.
+            return (0, 1.0);
+        }
     }
 
     private static double? DiskMinutes(RecordingSession session)

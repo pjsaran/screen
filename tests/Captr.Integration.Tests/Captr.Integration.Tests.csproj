@@ -23,6 +23,8 @@
   <ItemGroup>
     <!-- Every test file uses xunit attributes; import the namespace once. -->
     <Using Include="Xunit" />
+    <!-- Sequential execution — the file explains why in its own comment. -->
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
