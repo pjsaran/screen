@@ -21,6 +21,16 @@ Pieces:
   add a migration here and a fixture test in
   `tests/Captr.Core.Tests/Settings/` proving an old file still loads.
 
+- **SettingsChangePolicy** — the SPEC §8 lock. While a recording runs, capture and
+  quality settings accept only *degrading* changes (a lower frame rate, a lower
+  quality preset, removing a display); each is applied to the live session, rolls a
+  new segment, and is journaled. Anything asking the machine for more work is
+  refused with a message saying what to do instead. Settings that do not touch the
+  encoder — naming, retention, hotkeys, cosmetics — change freely at any time.
+  The comparison is against what the session is *actually* running at, not the
+  settings file, because automatic frame-rate reduction may already have taken it
+  lower.
+
 Two rules worth knowing:
 
 - **No secret ever appears here** (SPEC §7). Destinations reference a credential by
