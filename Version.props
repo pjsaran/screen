@@ -8,6 +8,6 @@
 -->
 <Project>
   <PropertyGroup>
-    <CaptrVersion>0.1.0</CaptrVersion>
+    <CaptrVersion>0.1.1</CaptrVersion>
   </PropertyGroup>
 </Project>

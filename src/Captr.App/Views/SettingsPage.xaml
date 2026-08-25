@@ -3,69 +3,329 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:views="clr-namespace:Captr.App.Views"
+    xmlns:theme="clr-namespace:Captr.App.Theme"
     Title="Settings">
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="24" MaxWidth="640" HorizontalAlignment="Left">
-            <TextBlock Text="Settings" FontSize="24" FontWeight="SemiBold" />
+    <Page.Resources>
+        <!-- One glanceable glyph per destination row: green check = will receive
+             recordings, grey pause = will be skipped. The colour alone never carries
+             the meaning (colour-blind users, monochrome projectors) — the SHAPE
+             differs too, and the tooltip says it in words. -->
+        <Style x:Key="EnabledIcon" TargetType="ui:SymbolIcon">
+            <Setter Property="Symbol" Value="CheckmarkCircle20" />
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+            <Setter Property="ToolTip" Value="Enabled — receives finished recordings" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Enabled}" Value="False">
+                    <Setter Property="Symbol" Value="PauseCircle20" />
+                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                    <Setter Property="ToolTip" Value="Off — skipped when recordings finish (change it via Edit)" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Page.Resources>
 
-            <TextBlock Text="Displays to record" FontWeight="SemiBold" Margin="0,20,0,4" />
-            <TextBlock Opacity="0.7" TextWrapping="Wrap"
-                       Text="New displays are recorded automatically until you untick them here." />
-            <ItemsControl ItemsSource="{Binding Displays}" Margin="0,6,0,0">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <CheckBox IsChecked="{Binding Included}" Content="{Binding Label}" Margin="0,2,0,2" />
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+    <Grid Margin="{StaticResource PagePadding}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-            <TextBlock Text="Frame rate" FontWeight="SemiBold" Margin="0,16,0,4" />
-            <ui:NumberBox Value="{Binding FrameRate}" Minimum="1" Maximum="60" MaxWidth="160" HorizontalAlignment="Left" />
+        <!-- Save and Reset sit HERE, with every other page's page-level actions,
+             rather than in a bar pinned to the bottom. Both are page-level: they act
+             on the whole page, not on one setting. -->
+        <views:PageHeader Grid.Row="0" Title="Settings">
+            <views:PageHeader.Actions>
+                <StackPanel Orientation="Horizontal">
+                    <!-- The confirmation appears right beside the button that caused
+                         it and clears itself after a few seconds. -->
+                    <TextBlock Text="{Binding SavedText}" Style="{StaticResource SuccessText}"
+                               VerticalAlignment="Center" Margin="0,0,12,0"
+                               Visibility="{Binding SavedText, Converter={StaticResource NonEmptyToVisibility}}" />
+                    <ui:Button Style="{StaticResource ActionButton}" Content="Reset to defaults"
+                               Command="{Binding ResetCommand}" />
+                    <ui:Button Style="{StaticResource ActionButton}" Content="Save" Appearance="Primary"
+                               Margin="6,0,0,0" Command="{Binding SaveCommand}" />
+                </StackPanel>
+            </views:PageHeader.Actions>
+        </views:PageHeader>
 
-            <TextBlock Text="Quality preset" FontWeight="SemiBold" Margin="0,16,0,4" />
-            <ComboBox ItemsSource="{Binding PresetNames}" SelectedItem="{Binding QualityPreset}"
-                      MaxWidth="240" HorizontalAlignment="Left" />
-            <TextBlock Text="Numeric quality override (advanced; empty = use preset)" Opacity="0.7" Margin="0,8,0,2" />
-            <TextBox Text="{Binding QualityOverride}" MaxWidth="160" HorizontalAlignment="Left" />
+        <!-- Only ERRORS live here now: outside the scrolling area, because a
+             validation error the user has to scroll to find is one they do not read,
+             and with no timer, because it describes something still to be fixed. The
+             "Saved." confirmation moved up beside the Save button. -->
+        <TextBlock Grid.Row="1" Text="{Binding ValidationText}" Style="{StaticResource ErrorText}"
+                   Margin="0,0,0,10" TextWrapping="Wrap"
+                   Visibility="{Binding ValidationText, Converter={StaticResource NonEmptyToVisibility}}" />
 
-            <TextBlock Text="Working folder" FontWeight="SemiBold" Margin="0,16,0,4" />
-            <TextBox Text="{Binding WorkingFolder}" />
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
+            <StackPanel>
 
-            <TextBlock Text="Output naming pattern" FontWeight="SemiBold" Margin="0,16,0,4" />
-            <TextBox Text="{Binding OutputPattern}" />
-            <TextBlock Opacity="0.7" Margin="0,4,0,0"
-                       Text="Tokens: {date} {start} {end} {duration} {machine} {user} {label}" />
+                <!-- ==== Recording quality ====================================== -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Recording quality" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Balance video smoothness, computer power, and sharpness." />
 
-            <TextBlock Text="Keep local files for (days, after delivery confirms)" FontWeight="SemiBold" Margin="0,16,0,4" />
-            <ui:NumberBox Value="{Binding RetentionDays}" Minimum="0" Maximum="365" MaxWidth="160" HorizontalAlignment="Left" />
+                        <UniformGrid Rows="1" Columns="3">
+                            <StackPanel Margin="0,0,10,0">
+                                <TextBlock theme:Typo.Text="Framerate" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding Rates}" SelectedItem="{Binding SelectedRate}"
+                                          DisplayMemberPath="Label" />
+                                <TextBlock Text="{Binding SelectedRate.Description}"
+                                           Style="{StaticResource FieldHint}" />
+                            </StackPanel>
 
-            <TextBlock Text="Global hotkeys" FontWeight="SemiBold" Margin="0,16,0,4" />
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="220" />
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition /><RowDefinition /><RowDefinition />
-                </Grid.RowDefinitions>
-                <TextBlock Text="Start:" VerticalAlignment="Center" Margin="0,2" />
-                <TextBox Grid.Column="1" Text="{Binding HotkeyStart}" Margin="8,2" />
-                <TextBlock Grid.Row="1" Text="Pause:" VerticalAlignment="Center" Margin="0,2" />
-                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding HotkeyPause}" Margin="8,2" />
-                <TextBlock Grid.Row="2" Text="Stop:" VerticalAlignment="Center" Margin="0,2" />
-                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding HotkeyStop}" Margin="8,2" />
-            </Grid>
-            <TextBlock Opacity="0.7" Margin="0,4,0,0" Text="Format: Ctrl+Alt+F9 (empty disables)" />
+                            <StackPanel Margin="0,0,10,0">
+                                <TextBlock theme:Typo.Text="Preset" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding Presets}" SelectedItem="{Binding SelectedPreset}"
+                                          DisplayMemberPath="DisplayName" />
+                                <TextBlock Text="{Binding SelectedPreset.Description}"
+                                           Style="{StaticResource FieldHint}" />
+                            </StackPanel>
 
-            <CheckBox Content="Start minimised to tray" IsChecked="{Binding StartMinimised}" Margin="0,16,0,0" />
-            <CheckBox Content="Closing the window hides to tray" IsChecked="{Binding CloseToTray}" Margin="0,6,0,0" />
+                            <StackPanel>
+                                <TextBlock theme:Typo.Text="Quality" Style="{StaticResource FieldLabel}" />
+                                <ComboBox ItemsSource="{Binding Qualities}" SelectedItem="{Binding SelectedQuality}"
+                                          DisplayMemberPath="DisplayName" />
+                                <TextBlock Text="{Binding SelectedQuality.Description}"
+                                           Style="{StaticResource FieldHint}" />
+                            </StackPanel>
+                        </UniformGrid>
+                    </StackPanel>
+                </Border>
 
-            <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
-                <ui:Button Content="Save" Appearance="Primary" Command="{Binding SaveCommand}" />
-                <ui:Button Content="Reset to defaults" Margin="8,0,0,0" Command="{Binding ResetCommand}" />
-                <TextBlock Text="{Binding SavedText}" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="Green" />
+                <!-- ==== Displays ============================================== -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Displays" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Uncheck monitors you don't want to record." />
+                        <ItemsControl ItemsSource="{Binding Displays}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox IsChecked="{Binding Included}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Label}" />
+                                            <TextBlock Text="{Binding Resolution}" Style="{StaticResource CaptionText}"
+                                                       Margin="8,1,0,0" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </CheckBox>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== Destinations ============================================ -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,2">
+                            <TextBlock theme:Typo.Text="Destinations" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
+                            <ui:Button Style="{StaticResource ActionButton}" Content="Add destination" HorizontalAlignment="Right" Click="OnAddDestinationClicked" />
+                        </Grid>
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Finished recordings are copied to each place below. None is fine — they then stay in the working folder." />
+
+                        <!-- A TABLE, drawn the same way as every other table in the
+                             application, so twenty destinations still scan as one
+                             list. Actions are icons with tooltips — a row's worth of
+                             worded buttons was wider than some destination names. -->
+                        <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1" CornerRadius="6" SnapsToDevicePixels="True"
+                                Visibility="{Binding Destinations.Count, Converter={StaticResource CountToVisibility}}">
+                            <StackPanel>
+                                <Border Style="{StaticResource TableHeader}" CornerRadius="5,5,0,0" Padding="10,6">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="34" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="92" />
+                                            <ColumnDefinition Width="1.6*" />
+                                            <ColumnDefinition Width="66" />
+                                        </Grid.ColumnDefinitions>
+                                        <!-- The first column is the status glyph; like the
+                                             actions column it needs no worded header. -->
+                                        <TextBlock Grid.Column="1" theme:Typo.Text="Name" Style="{StaticResource MicroLabel}" />
+                                        <TextBlock Grid.Column="2" theme:Typo.Text="Kind" Style="{StaticResource MicroLabel}" />
+                                        <TextBlock Grid.Column="3" theme:Typo.Text="Location" Style="{StaticResource MicroLabel}" />
+                                    </Grid>
+                                </Border>
+
+                                <ItemsControl ItemsSource="{Binding Destinations}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource TableRow}" Padding="10,6">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="34" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="92" />
+                                                        <ColumnDefinition Width="1.6*" />
+                                                        <ColumnDefinition Width="66" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <!-- An icon, not a disabled checkbox. A greyed-out
+                                                         tick reads as "unticked" at a glance, which is
+                                                         the opposite of what it means here — and it
+                                                         invites a click that does nothing, since the
+                                                         setting lives in the Edit dialog. Hover for
+                                                         the words. -->
+                                                    <ui:SymbolIcon Grid.Column="0" Style="{StaticResource EnabledIcon}"
+                                                                   VerticalAlignment="Center" HorizontalAlignment="Left" />
+
+                                                    <TextBlock Grid.Column="1" Text="{Binding Name}"
+                                                               Style="{StaticResource BodyText}" FontWeight="SemiBold"
+                                                               VerticalAlignment="Center" Margin="0,0,10,0"
+                                                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+
+                                                    <TextBlock Grid.Column="2" Text="{Binding Kind}"
+                                                               Style="{StaticResource CaptionText}"
+                                                               VerticalAlignment="Center" Margin="0,0,10,0" />
+
+                                                    <!-- A folder destination is located by its folder
+                                                         and a SharePoint one by its site; showing
+                                                         FolderPath for both printed a bare em dash
+                                                         for every SharePoint row. -->
+                                                    <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="0,0,10,0">
+                                                        <TextBlock Style="{StaticResource MonoText}"
+                                                                   Text="{Binding FolderPath, TargetNullValue=''}"
+                                                                   ToolTip="{Binding FolderPath}"
+                                                                   Visibility="{Binding FolderPath,
+                                                                                Converter={StaticResource NonEmptyToVisibility}}" />
+                                                        <TextBlock Style="{StaticResource MonoText}"
+                                                                   Text="{Binding SharePointSiteUrl, TargetNullValue=''}"
+                                                                   ToolTip="{Binding SharePointSiteUrl}"
+                                                                   Visibility="{Binding SharePointSiteUrl,
+                                                                                Converter={StaticResource NonEmptyToVisibility}}" />
+                                                    </StackPanel>
+
+                                                    <StackPanel Grid.Column="4" Orientation="Horizontal"
+                                                                HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                        <ui:Button Style="{StaticResource IconRowButton}"
+                                                                   Icon="{ui:SymbolIcon Edit20}" ToolTip="Edit"
+                                                                   Tag="{Binding}" Click="OnEditDestinationClicked" />
+                                                        <ui:Button Style="{StaticResource IconRowButton}" Margin="4,0,0,0"
+                                                                   Icon="{ui:SymbolIcon Delete20}" ToolTip="Remove"
+                                                                   Tag="{Binding}" Click="OnRemoveDestinationClicked" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== Files ================================================= -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Files" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Where recordings go, what they are called, and how long they stay." />
+
+                        <TextBlock theme:Typo.Text="Working folder" Style="{StaticResource FieldLabel}" />
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" Text="{Binding WorkingFolder, UpdateSourceTrigger=PropertyChanged}" />
+                            <ui:Button Style="{StaticResource ActionButton}" Grid.Column="1" Content="Browse…" Margin="6,0,0,0"
+                                       Click="OnBrowseWorkingFolderClicked" />
+                        </Grid>
+
+                        <TextBlock theme:Typo.Text="Naming pattern" Style="{StaticResource FieldLabel}" />
+                        <TextBox Text="{Binding OutputPattern, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Style="{StaticResource FieldHint}"
+                                   Text="Tokens like {date} and {machine} build the name — the Help page lists them all." />
+
+                        <TextBlock theme:Typo.Text="Keep local copies for (days)" Style="{StaticResource FieldLabel}" />
+                        <ui:NumberBox Value="{Binding RetentionDays}" Minimum="0" Maximum="3650"
+                                      Style="{StaticResource NumberField}" />
+                        <TextBlock Style="{StaticResource FieldHint}"
+                                   Text="Deleted only after every destination has confirmed, and only when space runs short." />
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== Transfers ============================================= -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Transfers" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="How hard Captr retries an unreachable destination. Giving up never loses anything — the transfer waits for a Retry on the Transfers page." />
+
+                        <UniformGrid Rows="1" Columns="3">
+                            <StackPanel Margin="0,0,10,0">
+                                <TextBlock theme:Typo.Text="Automatic attempts" Style="{StaticResource FieldLabel}" />
+                                <ui:NumberBox Value="{Binding MaxAttempts}" Minimum="1" Maximum="50"
+                                              Style="{StaticResource NumberField}" />
+                                <TextBlock Style="{StaticResource FieldHint}"
+                                           Text="Then it stops and waits for you." />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,10,0">
+                                <TextBlock theme:Typo.Text="First retry after (seconds)" Style="{StaticResource FieldLabel}" />
+                                <ui:NumberBox Value="{Binding FirstRetrySeconds}" Minimum="1" Maximum="3600"
+                                              Style="{StaticResource NumberField}" />
+                                <TextBlock Style="{StaticResource FieldHint}"
+                                           Text="Each retry waits about twice as long as the last." />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock theme:Typo.Text="Longest wait (seconds)" Style="{StaticResource FieldLabel}" />
+                                <ui:NumberBox Value="{Binding MaxRetrySeconds}" Minimum="1" Maximum="86400"
+                                              Style="{StaticResource NumberField}" />
+                                <TextBlock Style="{StaticResource FieldHint}"
+                                           Text="The ceiling on that doubling." />
+                            </StackPanel>
+                        </UniformGrid>
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== Hotkeys =============================================== -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Hotkeys" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Click a box and press the combination you want. Backspace disables one." />
+
+                        <UniformGrid Rows="1" Columns="2">
+                            <StackPanel Margin="0,0,10,0">
+                                <TextBlock theme:Typo.Text="Start / stop recording" Style="{StaticResource FieldLabel}" />
+                                <views:HotkeyBox Text="{Binding RecordToggleHotkey, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Style="{StaticResource FieldHint}"
+                                           Text="One key: starts when idle, stops when recording." />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock theme:Typo.Text="Pause / resume" Style="{StaticResource FieldLabel}" />
+                                <views:HotkeyBox Text="{Binding PauseToggleHotkey, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Style="{StaticResource FieldHint}"
+                                           Text="Pauses or resumes. Does nothing when idle." />
+                            </StackPanel>
+                        </UniformGrid>
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== Window behaviour ====================================== -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Window" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Hiding or closing the window never affects a recording — it runs in its own background process." />
+                        <CheckBox IsChecked="{Binding CloseToTray}"
+                                  Content="Closing the window hides Captr in the notification area" />
+                        <CheckBox IsChecked="{Binding MinimiseWhileRecording}"
+                                  Content="Hide the window while recording (Captr stays available only from the tray)" />
+                        <CheckBox IsChecked="{Binding StartMinimised}"
+                                  Content="Start hidden in the notification area" />
+                    </StackPanel>
+                </Border>
             </StackPanel>
-            <TextBlock Text="{Binding ValidationText}" Margin="0,8,0,24" Foreground="IndianRed" TextWrapping="Wrap" />
-        </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+
+    </Grid>
 </Page>

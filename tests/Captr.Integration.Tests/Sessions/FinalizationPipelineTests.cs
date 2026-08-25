@@ -47,7 +47,8 @@ public class FinalizationPipelineTests : IDisposable
             CanvasHeight = 180,
             FrameRate = 10,
             EncoderName = "libopenh264",
-            QualityPreset = "test",
+            Quality = "balanced",
+            SpeedPreset = "veryfast",
             EncoderArguments = [],
             WorkingFolder = folder,
         }))

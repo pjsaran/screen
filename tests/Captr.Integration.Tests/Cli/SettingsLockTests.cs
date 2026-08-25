@@ -55,7 +55,9 @@ public class SettingsLockTests
         CancellationToken cancellationToken = TestContext.Current.CancellationToken;
         string workingRoot = Directory.CreateTempSubdirectory("captr-lock-").FullName;
         KillStrayHosts();
-        string? saved = BackUpSettings();
+        // Drives the REAL captr executable, which reads and writes the real
+        // settings file. The guard puts it back exactly as it was.
+        using var settingsGuard = new RealSettingsGuard();
 
         try
         {
@@ -95,7 +97,6 @@ public class SettingsLockTests
         finally
         {
             KillStrayHosts();
-            RestoreSettings(saved);
             try
             {
                 Directory.Delete(workingRoot, recursive: true);
@@ -122,23 +123,6 @@ public class SettingsLockTests
         throw new TimeoutException("The recorder never returned to idle after stop.");
     }
 
-    private static string SettingsPath() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Captr", "settings.json");
-
-    private static string? BackUpSettings() =>
-        File.Exists(SettingsPath()) ? File.ReadAllText(SettingsPath()) : null;
-
-    private static void RestoreSettings(string? saved)
-    {
-        if (saved is not null)
-        {
-            File.WriteAllText(SettingsPath(), saved);
-        }
-        else if (File.Exists(SettingsPath()))
-        {
-            File.Delete(SettingsPath());
-        }
-    }
 
     private static void KillStrayHosts()
     {

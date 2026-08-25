@@ -16,8 +16,12 @@ public static class IpcProtocol
     /// 1 — initial protocol.
     /// 2 — StatusResponse gained live coverage (gap count + covered fraction);
     ///     resend and clip messages added.
+    /// 3 — clip removed; StartRequest's single quality preset split into a speed
+    ///     preset and a quality level; StatusResponse reports both.
+    /// 4 — "delivery" became "transfer" throughout (kinds renamed); transfers gained
+    ///     a cancel verb; RecordingSummary carries its finalised output file names.
     /// </summary>
-    public const int Version = 2;
+    public const int Version = 4;
 
     /// <summary>Envelopes larger than this are rejected — no legitimate message is
     /// near it, and a corrupt length prefix must not allocate gigabytes.</summary>
@@ -138,10 +142,10 @@ public static class IpcKinds
     public const string ListRecordings = "list-recordings";
     public const string Verify = "verify";
     public const string Recover = "recover";
-    public const string ListDeliveries = "list-deliveries";
-    public const string RetryDelivery = "retry-delivery";
+    public const string ListTransfers = "list-transfers";
+    public const string RetryTransfer = "retry-transfer";
+    public const string CancelTransfer = "cancel-transfer";
     public const string Resend = "resend";
-    public const string Clip = "clip";
     public const string SetSettings = "set-settings";
 }
 
@@ -153,7 +157,9 @@ public sealed record HelloResponse(bool Accepted, int HostProtocolVersion, strin
 /// are answered, not fatal).</summary>
 public sealed record ErrorResponse(string Message);
 
-public sealed record StartRequest(int? FrameRate, string? QualityPreset, string? Label);
+/// <summary>Start a recording. Every field is a per-session override of the saved
+/// settings; null means "use what is saved".</summary>
+public sealed record StartRequest(int? FrameRate, string? Quality, string? SpeedPreset, string? Label);
 
 public sealed record StartResponse(bool AlreadyRecording, Guid SessionId, string Message);
 
@@ -177,15 +183,22 @@ public sealed record StatusResponse(
     string? WorkingFolder,
     double? DiskMinutesRemaining,
     int GapCount = 0,
-    double Coverage = 1.0);
+    double Coverage = 1.0,
+    string? Quality = null,
+    string? SpeedPreset = null);
 
+/// <summary>One past recording, as every list of them sees it.</summary>
+/// <param name="OutputFiles">The finalised video files' names, from the integrity
+/// record. Empty until the session is finalised. Carried here so callers can offer
+/// "send again" only when there is actually something to send.</param>
 public sealed record RecordingSummary(
     string Folder,
     DateTimeOffset StartedUtc,
     TimeSpan RecordedSpan,
     long TotalBytes,
     int GapCount,
-    bool Finalized);
+    bool Finalized,
+    IReadOnlyList<string>? OutputFiles = null);
 
 public sealed record ListRecordingsResponse(IReadOnlyList<RecordingSummary> Recordings);
 
@@ -197,7 +210,7 @@ public sealed record RecoverResponse(IReadOnlyList<RecoverySummary> Recovered);
 
 public sealed record RecoverySummary(string Folder, bool Succeeded, string? FailureReason, TimeSpan RecoveredDuration);
 
-public sealed record DeliverySummary(
+public sealed record TransferSummary(
     long Id,
     string OutputPath,
     string DestinationName,
@@ -206,20 +219,19 @@ public sealed record DeliverySummary(
     DateTimeOffset? NextAttemptUtc,
     string? LastError);
 
-public sealed record ListDeliveriesResponse(IReadOnlyList<DeliverySummary> Deliveries);
+/// <summary>Stop a transfer that is queued, running, or backing off. It stays in
+/// the list and can be retried by hand; nothing local is touched.</summary>
+public sealed record CancelTransferRequest(long Id);
 
-public sealed record RetryDeliveryRequest(long Id);
+public sealed record ListTransfersResponse(IReadOnlyList<TransferSummary> Transfers);
+
+public sealed record RetryTransferRequest(long Id);
 
 /// <summary>Re-send a finished recording's outputs to every enabled destination
 /// (SPEC §9's "re-sending to a destination").</summary>
 public sealed record ResendRequest(string Folder);
 
 public sealed record ResendResponse(int Queued, string Message);
-
-/// <summary>Extract a clip by stream copy at segment boundaries (SPEC §9).</summary>
-public sealed record ClipRequest(string Folder, int FirstSegment, int LastSegment);
-
-public sealed record ClipResponse(string ClipPath, string Message);
 
 /// <summary>Save settings THROUGH the host, so the capture/quality lock of SPEC §8
 /// can be enforced against the live session.</summary>

@@ -113,6 +113,33 @@ public class FfmpegArgumentBuilderTests
     }
 
     [Fact]
+    public void Gdi_capture_declares_one_input_per_display_and_reads_from_input_labels()
+    {
+        // The compatibility path for machines whose display driver cannot serve
+        // Desktop Duplication (AWS WorkSpaces and similar virtual desktops):
+        // capture becomes a gdigrab INPUT, and the graph starts from [0:v].
+        GoldenFile.Assert("d1_gdi",
+            FfmpegArgumentBuilder.Build(
+                MakePlan([new CaptureSource(0, 1920, 1080)], encoder: SoftwareOpenH264)
+                with
+                { CaptureMethod = CaptureMethod.Gdi }));
+    }
+
+    [Fact]
+    public void Gdi_capture_addresses_each_display_by_virtual_desktop_position()
+    {
+        // A display LEFT of the primary has a negative virtual X — gdigrab must
+        // receive it verbatim, or the wrong screen region is recorded.
+        GoldenFile.Assert("d2_gdi_offsets",
+            FfmpegArgumentBuilder.Build(
+                MakePlan(
+                    [new CaptureSource(0, 1920, 1080, -1920, 0), new CaptureSource(1, 1920, 1080, 0, 0)],
+                    encoder: SoftwareOpenH264)
+                with
+                { CaptureMethod = CaptureMethod.Gdi }));
+    }
+
+    [Fact]
     public void A_later_arrangement_group_lands_in_the_segment_file_names()
     {
         var plan = MakePlan([new CaptureSource(0, 1920, 1080)]) with { ArrangementGroup = 3 };

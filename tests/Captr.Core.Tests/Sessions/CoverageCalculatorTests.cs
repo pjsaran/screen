@@ -26,7 +26,8 @@ public class CoverageCalculatorTests
         CanvasHeight = 1,
         FrameRate = 15,
         EncoderName = "e",
-        QualityPreset = "q",
+        Quality = "balanced",
+        SpeedPreset = "veryfast",
         EncoderArguments = [],
         WorkingFolder = "w",
     };

@@ -39,28 +39,34 @@ public static class SettingsChangePolicy
             degrades = true;
         }
 
-        // --- Quality: a higher quantizer step means a smaller, softer picture -----
-        int currentStep = StepOf(current.QualityPreset);
-        int proposedStep = StepOf(proposed.QualityPreset);
-        if (proposedStep < currentStep)
+        // --- Quality: a higher CRF means a smaller, softer picture ----------------
+        QualityLevel currentQuality = QualityLevels.FindOrDefault(current.Quality);
+        QualityLevel proposedQuality = QualityLevels.FindOrDefault(proposed.Quality);
+        if (proposedQuality.Crf < currentQuality.Crf)
         {
             rejections.Add(
-                $"Quality cannot be raised from '{current.QualityPreset}' to '{proposed.QualityPreset}' while recording. " +
-                "Stop the recording first, or choose a lower preset instead.");
+                $"Quality cannot be raised from '{currentQuality.DisplayName}' to '{proposedQuality.DisplayName}' while recording. " +
+                "Stop the recording first, or choose a lower quality instead.");
         }
-        else if (proposedStep > currentStep)
+        else if (proposedQuality.Crf > currentQuality.Crf)
         {
             degrades = true;
         }
 
-        if (proposed.QualityOverride is { } proposedOverride
-            && current.QualityOverride is { } currentOverride
-            && proposedOverride < currentOverride)
+        // --- Speed preset: a FASTER preset asks the encoder for LESS work ---------
+        // (Step 0 is ultrafast; moving to a lower step is the degrading direction.)
+        SpeedPreset currentSpeed = SpeedPresets.FindOrDefault(current.SpeedPreset);
+        SpeedPreset proposedSpeed = SpeedPresets.FindOrDefault(proposed.SpeedPreset);
+        if (proposedSpeed.Step > currentSpeed.Step)
         {
-            // A LOWER quantizer number means HIGHER quality — more work.
             rejections.Add(
-                $"The quality override cannot be lowered from {currentOverride} to {proposedOverride} while recording " +
-                "(a lower number means higher quality).");
+                $"The speed preset cannot be moved from '{currentSpeed.DisplayName}' to '{proposedSpeed.DisplayName}' while " +
+                "recording — a slower preset asks the encoder for more work per frame. " +
+                "Stop the recording first, or choose a faster preset instead.");
+        }
+        else if (proposedSpeed.Step < currentSpeed.Step)
+        {
+            degrades = true;
         }
 
         // --- Displays: removing one is degrading, adding one is not ---------------
@@ -90,12 +96,6 @@ public static class SettingsChangePolicy
             ? new SettingsChangeVerdict(false, false, rejections)
             : new SettingsChangeVerdict(true, degrades, []);
     }
-
-    /// <summary>Quality step of a preset name; an unknown name is treated as the
-    /// default so a typo cannot look like a degradation.</summary>
-    private static int StepOf(string presetName) =>
-        QualityPresets.Find(presetName)?.QuantizerStep
-        ?? QualityPresets.Find(QualityPresets.DefaultName)!.QuantizerStep;
 }
 
 /// <summary>

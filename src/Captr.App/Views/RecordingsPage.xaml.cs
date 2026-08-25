@@ -5,9 +5,14 @@ using Captr.App.ViewModels;
 
 namespace Captr.App.Views;
 
-/// <summary>The recordings page. Owns the typed-confirmation dialog for deletion —
-/// deleting a recording ALWAYS requires typing the session name (SPEC §7/§13).</summary>
-public partial class RecordingsPage : Page
+/// <summary>
+/// The recordings page. Owns the "more actions" menu and the typed-confirmation
+/// dialog for deletion — deleting a recording ALWAYS requires typing the session
+/// name (SPEC §7/§13). The list refreshes itself while the page is on screen; the
+/// folder watcher behind that is started and stopped here so it does not hold a
+/// directory handle for the life of the application.
+/// </summary>
+public partial class RecordingsPage : Page, IPageLifecycle, IDisposable
 {
     private readonly RecordingsViewModel _viewModel;
 
@@ -16,20 +21,47 @@ public partial class RecordingsPage : Page
         _viewModel = viewModel;
         DataContext = viewModel;
         InitializeComponent();
-        Loaded += async (_, _) => await _viewModel.RefreshAsync();
+        Loaded += (_, _) => OnEntering();
+        Unloaded += (_, _) => OnLeaving();
     }
 
-    private async void OnClipClicked(object sender, RoutedEventArgs e)
+    /// <inheritdoc />
+    public void OnEntering()
     {
-        if ((sender as FrameworkElement)?.Tag is not RecordingRow row)
-        {
-            return;
-        }
+        _ = _viewModel.RefreshAsync();
+        _viewModel.StartWatching();
+    }
 
-        var dialog = new ClipRangeWindow(row.Folder) { Owner = Window.GetWindow(this) };
-        if (dialog.ShowDialog() == true)
+    /// <inheritdoc />
+    public void OnLeaving() => _viewModel.StopWatching();
+
+    /// <summary>Opens the row's overflow menu under its button. The menu is declared
+    /// on the button in XAML so each row's items bind to that row.</summary>
+    private void OnMoreClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { ContextMenu: { } menu } button)
         {
-            await _viewModel.ExtractClipAsync(row, dialog.FirstSegment, dialog.LastSegment);
+            menu.PlacementTarget = button;
+            menu.IsOpen = true;
+        }
+    }
+
+    /// <summary>
+    /// Queues this recording to the destinations that do not have it yet.
+    /// </summary>
+    /// <remarks>
+    /// A Click handler rather than a Command binding, deliberately. A ContextMenu is
+    /// hosted in its own popup visual tree, so a
+    /// <c>{Binding DataContext.X, RelativeSource={RelativeSource AncestorType=ItemsControl}}</c>
+    /// inside one finds no ancestor, resolves to null, and produces a menu item that
+    /// looks enabled and does nothing at all when clicked. Reaching the view model
+    /// through the page — which does have it — is the reliable way.
+    /// </remarks>
+    private async void OnResendClicked(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is RecordingRow row)
+        {
+            await _viewModel.ResendAsync(row);
         }
     }
 
@@ -56,5 +88,11 @@ public partial class RecordingsPage : Page
         {
             await _viewModel.DeleteConfirmedAsync(row);
         }
+    }
+
+    public void Dispose()
+    {
+        _viewModel.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

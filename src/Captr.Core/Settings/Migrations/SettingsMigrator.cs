@@ -5,8 +5,8 @@ namespace Captr.Core.Settings.Migrations;
 /// <summary>
 /// One forward step of the settings schema: takes a settings document at
 /// <see cref="FromVersion"/> and returns it at <c>FromVersion + 1</c>. Implementations
-/// live in this folder, one class per step, named after what changed
-/// (e.g. <c>V1ToV2_RenameRetention</c>).
+/// live in this folder, one class per step, named after what changed and which step
+/// it is (e.g. <c>SplitQualityAndToggleHotkeysV1ToV2</c>).
 /// </summary>
 public interface ISettingsMigration
 {
@@ -32,7 +32,9 @@ public sealed class SettingsMigrator
 
     /// <summary>The production migration chain. Add new migrations here AND to the
     /// fixture tests in <c>tests/Captr.Core.Tests/Settings/</c>.</summary>
-    public static SettingsMigrator Default { get; } = new();
+    public static SettingsMigrator Default { get; } = new(
+        new SplitQualityAndToggleHotkeysV1ToV2(),
+        new RenameFramerateAndPresetV2ToV3());
 
     public SettingsMigrator(params IReadOnlyList<ISettingsMigration> migrations)
     {

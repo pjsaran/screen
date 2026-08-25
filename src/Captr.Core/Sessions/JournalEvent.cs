@@ -63,7 +63,12 @@ public sealed record SessionStarted : JournalEvent
     public required int CanvasHeight { get; init; }
     public required int FrameRate { get; init; }
     public required string EncoderName { get; init; }
-    public required string QualityPreset { get; init; }
+
+    /// <summary>Quality level the session started at; see <c>Encoders/QualityLevels</c>.</summary>
+    public required string Quality { get; init; }
+
+    /// <summary>Speed preset the session started at; see <c>Encoders/SpeedPresets</c>.</summary>
+    public required string SpeedPreset { get; init; }
 
     /// <summary>The exact argument vector handed to the encoder process.</summary>
     public required IReadOnlyList<string> EncoderArguments { get; init; }

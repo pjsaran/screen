@@ -44,7 +44,7 @@ public class CrossProcessHostTests
         {
             starter.ShouldNotBeNull();
             StartResponse started = await starter.RequestAsync<StartResponse>(
-                IpcKinds.Start, new StartRequest(10, null, "xproc"), cancellationToken);
+                IpcKinds.Start, new StartRequest(10, null, null, "xproc"), cancellationToken);
             started.AlreadyRecording.ShouldBeFalse(started.Message);
         }
 
@@ -58,7 +58,7 @@ public class CrossProcessHostTests
             stopper.ShouldNotBeNull("the host must still be running");
 
             StartResponse startAgain = await stopper.RequestAsync<StartResponse>(
-                IpcKinds.Start, new StartRequest(null, null, null), cancellationToken);
+                IpcKinds.Start, new StartRequest(null, null, null, null), cancellationToken);
             startAgain.AlreadyRecording.ShouldBeTrue();
 
             StatusResponse status = await stopper.RequestAsync<StatusResponse>(IpcKinds.Status, null, cancellationToken);

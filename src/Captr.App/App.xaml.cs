@@ -39,6 +39,11 @@ public partial class App : Application
             return;
         }
 
+        // Open the settings file and the transfer database on a background thread now,
+        // while the window is still being built and nothing is clickable, rather than
+        // on whichever page the user opens first. See Services/Warmup.
+        Warmup.Begin();
+
         string version = typeof(App).Assembly.GetName().Version?.ToString() ?? "0";
         _host = new HostConnection(version);
         _host.Start();
@@ -68,16 +73,20 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// Registers the two global hotkeys. Both are TOGGLES (SPEC §9 as refined for
+    /// usability): one key starts or stops, the other pauses or resumes. A hotkey is
+    /// pressed without looking at the screen, so it must never be possible to press
+    /// "stop" while idle or "start" while already recording — with a toggle, it isn't.
+    /// </summary>
     private void RegisterHotkeys(MainWindow window)
     {
         Core.Settings.CaptrSettings settings = new Core.Settings.SettingsStore().Load();
         _hotkeys = new HotkeyManager(window);
-        _hotkeys.Register(settings.Hotkeys.Start, "start recording",
-            () => window.Dispatcher.BeginInvoke(() => window.Status.StartCommand.Execute(null)));
-        _hotkeys.Register(settings.Hotkeys.Pause, "pause recording",
-            () => window.Dispatcher.BeginInvoke(() => window.Status.PauseCommand.Execute(null)));
-        _hotkeys.Register(settings.Hotkeys.Stop, "stop recording",
-            () => window.Dispatcher.BeginInvoke(() => window.Status.StopCommand.Execute(null)));
+        _hotkeys.Register(settings.Hotkeys.RecordToggle, "start/stop recording",
+            () => window.Dispatcher.BeginInvoke(() => _ = window.Home.ToggleRecordingAsync()));
+        _hotkeys.Register(settings.Hotkeys.PauseToggle, "pause/resume recording",
+            () => window.Dispatcher.BeginInvoke(() => _ = window.Home.TogglePauseAsync()));
 
         if (_hotkeys.Conflicts.Count > 0)
         {
@@ -92,6 +101,13 @@ public partial class App : Application
     {
         _hotkeys?.Dispose();
         _focusWait?.Unregister(null);
+
+        // Release the window's tray icon, page timers, and status subscription on
+        // EVERY exit path, not only the tray's Quit — a shell-initiated shutdown or
+        // a log-off would otherwise leave a ghost icon in the notification area
+        // until the user hovers over it.
+        (base.MainWindow as Captr.App.MainWindow)?.Dispose();
+
         // Fire-and-forget: the process is exiting; the poll loop dies with it and
         // holds nothing that needs an orderly flush.
         _ = _host?.DisposeAsync().AsTask();

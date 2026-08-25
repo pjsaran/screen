@@ -8,7 +8,7 @@ namespace Captr.App.Views;
 /// requires an explicit typed confirmation"). The destructive button only enables
 /// once the typed text matches exactly.
 /// </summary>
-public partial class TypedConfirmationWindow : Window
+public partial class TypedConfirmationWindow
 {
     private readonly string _requiredText;
 

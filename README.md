@@ -2,7 +2,7 @@
 
 A lightweight Windows screen recorder built for one job: **capture what is on the
 screen, for hours, unattended, and never lose the footage.** One or more displays
-are recorded into crash-safe segmented video, driven from a small desktop UI or
+are recorded into crash-safe segmented video, driven from a small desktop window or
 entirely from the command line (so Windows Task Scheduler can run it).
 
 Built to `SPEC.md`; the design priorities, in order:
@@ -11,45 +11,50 @@ Built to `SPEC.md`; the design priorities, in order:
    unplayable file, never more lost than the segment in progress.
 2. **No licensing ambiguity.** Every dependency is unambiguously free for
    commercial use; an automated gate fails the build otherwise.
-3. **Light.** Nothing runs when nothing is being recorded.
-4. **Scriptable.** Full CLI parity, meaningful exit codes.
-
-## Building from source
-
-Prerequisites: Windows 10/11 x64, .NET 10 SDK, git. Then:
-
-```powershell
-pwsh build/fetch-ffmpeg.ps1     # once: pinned LGPL FFmpeg, checksum-verified
-pwsh build/build.ps1            # format check, licence gate, build, tests
-pwsh build/build.ps1 -Publish -Installer   # + self-contained publish + installer
-```
-
-Everything a build produces lands in `publish/` and `artifacts/` (installer,
-`SHA256SUMS.txt`, `release.json`). Code signing is driven by environment
-variables (`CAPTR_SIGN_PFX`, `CAPTR_SIGN_PFX_PASSWORD`) and the build succeeds
-unsigned with a loud warning when they are absent.
-
-Tests: `dotnet test --project tests/Captr.Core.Tests` runs everywhere.
-`tests/Captr.Integration.Tests` needs the fetched FFmpeg; its `Display`, `Gpu`,
-and `Soak` categories additionally need a real desktop and GPU, so they run only
-with `pwsh build/build.ps1 -Full` (set `CAPTR_SOAK_MINUTES` to lengthen the soak).
-Integration tests run sequentially on purpose — they share one machine-global
-recording host and one GPU. `docs/test-coverage.md` maps every spec test
-requirement to the test that covers it.
+3. **Light.** Nothing runs when nothing is being recorded. No service, no
+   scheduled task, no resident agent, no telemetry.
+4. **Scriptable.** Full command-line parity, meaningful exit codes.
 
 ## Documentation
 
-| Topic | Where |
-|---|---|
-| How the whole thing fits together | `ARCHITECTURE.md` (then per-folder READMEs) |
-| What each spec test requirement is covered by | `docs/test-coverage.md` |
-| Where and why Captr departs from the spec's letter | `docs/decisions.md` |
-| Install / silent install / upgrade / uninstall | `docs/install.md` |
-| Scheduled recording (read the session-0 warning!) | `docs/task-scheduler.md` |
-| Command-line reference and exit codes | `docs/cli.md` |
-| SharePoint destination setup and credential rotation | `docs/graph-setup.md` |
-| Bundled FFmpeg licence obligations and source offer | `docs/ffmpeg-source-offer.md` |
-| Release checklist incl. deferred clean-machine checks | `docs/release-verification.md` |
+Everything is in **[`docs/`](docs/)**, split by who is reading it.
+
+**[User guide](docs/user-guide/)** — installing and using Captr:
+[installation](docs/user-guide/installation.md) ·
+[getting started](docs/user-guide/getting-started.md) ·
+[recording](docs/user-guide/recording.md) ·
+[destinations and transfers](docs/user-guide/destinations-and-transfers.md) ·
+[naming patterns](docs/user-guide/naming-patterns.md) ·
+[SharePoint setup](docs/user-guide/sharepoint-setup.md) ·
+[command line](docs/user-guide/command-line.md) ·
+[scheduled recording](docs/user-guide/scheduling.md) ·
+[troubleshooting](docs/user-guide/troubleshooting.md)
+
+**[Developer guide](docs/developer-guide/)** — building and changing it:
+[architecture](docs/developer-guide/architecture.md) ·
+[environment setup](docs/developer-guide/environment-setup.md) ·
+[building](docs/developer-guide/building.md) ·
+[testing](docs/developer-guide/testing.md) ·
+[releasing](docs/developer-guide/releasing.md) ·
+[upgrading FFmpeg](docs/developer-guide/upgrading-ffmpeg.md) ·
+[design decisions](docs/developer-guide/design-decisions.md) ·
+[release verification](docs/developer-guide/release-verification.md)
+
+**Legal:** [bundled FFmpeg licence obligations and source
+offer](docs/ffmpeg-source-offer.md).
+
+## Building from source
+
+Windows 10/11 x64, the .NET 10 SDK, PowerShell 7, and git. Nothing else — the build
+fetches FFmpeg and Inno Setup itself, pinned and checksum-verified.
+
+```powershell
+pwsh build/build.ps1                        # licence gate, format, build, tests
+pwsh build/build.ps1 -Publish -Installer    # + self-contained publish + installer
+```
+
+Full detail in [environment setup](docs/developer-guide/environment-setup.md) and
+[building](docs/developer-guide/building.md).
 
 ## A tour in five commands
 
@@ -57,12 +62,29 @@ requirement to the test that covers it.
 captr version                     # exactly which build this is
 captr start --label morning       # begins recording every attached display
 captr status                      # state, elapsed, coverage, encoder, disk left
-captr stop                        # finalises and hands off to delivery
-captr recordings list             # what you have, and whether it was delivered
+captr stop                        # finalises and hands off to the transfer queue
+captr recordings list             # what you have
 ```
+
+## Choosing how it records
+
+Three independent settings, each offered in the window and on `captr start`,
+because they answer three different questions:
+
+| Setting | Question | Options |
+|---|---|---|
+| **Framerate** | How often is the screen sampled? | 5 · 10 · 15 (default) · 20 · 24 · 30 · 45 · 60 FPS |
+| **Preset** | How much CPU may the encoder spend per frame? | Ultrafast → Fast; *faster* costs less CPU and makes **bigger** files |
+| **Quality** | How good must the picture look? | Lossless · Maximum · High · Balanced (default) · Compact |
+
+Every option is labelled with its trade-off, so nobody needs to know what CRF means
+to choose sensibly. All three can be *lowered* while a recording is in progress;
+raising any of them waits until it stops.
 
 ## Where your data lives
 
-Settings `%APPDATA%\Captr`; recordings, logs, delivery queue
-`%LOCALAPPDATA%\Captr`; credentials in Windows Credential Manager (never in
-files). The uninstaller keeps all of it unless you explicitly say otherwise.
+Everything Captr keeps lives under `%LOCALAPPDATA%\Captr` — settings, recordings,
+logs, the transfer queue, and the encoder cache — so a backup or a clean-up is one
+folder. Credentials are the exception: they live in Windows Credential Manager and
+never in a file. The uninstaller keeps all of it unless you explicitly say
+otherwise.

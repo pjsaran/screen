@@ -4,34 +4,91 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:tb="clr-namespace:H.NotifyIcon;assembly=H.NotifyIcon.Wpf"
+    xmlns:theme="clr-namespace:Captr.App.Theme"
     Title="Captr"
-    Width="1080" Height="720"
+    ResizeMode="CanMinimize"
+    WindowStartupLocation="CenterScreen"
+    Icon="pack://application:,,,/Assets/captr.ico"
     WindowBackdropType="Mica"
     ExtendsContentIntoTitleBar="True"
     WindowCornerPreference="Round">
+    <!-- No Width/Height here on purpose: the size is computed from the screen's work
+         area in the constructor (see SizeToScreen). ResizeMode="CanMinimize" removes
+         the maximise button and the drag-resize borders, so the window is one fixed,
+         well-proportioned size that still fits a small laptop screen. -->
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="Captr" />
+        <!-- The title bar carries the app icon, so Captr is identifiable from the
+             window itself and not only from the taskbar. -->
+        <!-- ShowMaximize="False" as well as ResizeMode: WPF-UI's title bar draws its
+             own caption buttons, so hiding the maximise button is its decision, not
+             the window's. Both are needed for the button to actually disappear. -->
+        <ui:TitleBar Grid.Row="0" Title="Captr" ShowMaximize="False"
+                     Icon="{ui:ImageIcon 'pack://application:,,,/Assets/captr.ico'}" />
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="184" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <ListBox x:Name="NavigationList" Grid.Column="0" Margin="8"
-                     BorderThickness="0" Background="Transparent"
-                     SelectionChanged="OnNavigationChanged">
-                <ListBoxItem Content="Status" IsSelected="True" />
-                <ListBoxItem Content="Recordings" />
-                <ListBoxItem Content="Delivery" />
-                <ListBoxItem Content="Settings" />
-                <ListBoxItem Content="Diagnostics" />
-            </ListBox>
+            <!-- ==== Left rail ==================================================
+                 Section names are set through theme:Typo.Text, which upper-cases
+                 them and adds letter spacing (WPF has no letter-spacing property —
+                 see Theme/Typo.cs). Capitals without that spacing look cramped,
+                 which is why every uppercase label in this UI goes through it. -->
+            <Grid Grid.Column="0" Margin="8,0,4,8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <ListBox x:Name="NavigationList" Grid.Row="0"
+                         BorderThickness="0" Background="Transparent"
+                         ItemContainerStyle="{StaticResource NavItem}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         SelectionChanged="OnNavigationChanged">
+                    <ListBoxItem IsSelected="True">
+                        <TextBlock theme:Typo.Text="Home" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock theme:Typo.Text="Recordings" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock theme:Typo.Text="Transfers" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock theme:Typo.Text="Settings" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock theme:Typo.Text="Diagnostics" />
+                    </ListBoxItem>
+                    <ListBoxItem>
+                        <TextBlock theme:Typo.Text="Help" />
+                    </ListBoxItem>
+                </ListBox>
+
+                <!-- A permanent, unmissable readout of what the recorder is doing,
+                     so the answer to "am I recording?" never depends on which page
+                     happens to be open. -->
+                <Border x:Name="RailStateCard" Grid.Row="1" Style="{StaticResource ListRow}" Margin="0,8,0,0">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="RailStateDot" Width="8" Height="8" Margin="0,0,8,0"
+                                     VerticalAlignment="Center"
+                                     Fill="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <TextBlock x:Name="RailStateText" Style="{StaticResource MicroLabel}"
+                                       theme:Typo.Text="Idle" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock x:Name="RailDetailText" Text="Nothing is recording"
+                                   Style="{StaticResource CaptionText}" Margin="16,3,0,0" />
+                    </StackPanel>
+                </Border>
+            </Grid>
 
             <!-- Frame, not ContentControl: WPF Pages may only parent to a Window or
                  Frame. Navigation chrome and the back-stack are disabled — the nav
@@ -40,8 +97,9 @@
                    NavigationUIVisibility="Hidden" JournalOwnership="OwnsJournal" />
         </Grid>
 
-        <!-- The tray icon lives with the window but outlives its visibility:
-             closing the window hides to tray (SPEC §9). -->
+        <!-- The tray icon lives with the window but outlives its visibility: closing
+             or minimising while recording hides to tray (SPEC §9). Its icons and
+             tooltip are driven by TrayPresenter. -->
         <tb:TaskbarIcon
             x:Name="TrayIcon"
             ToolTipText="Captr — idle"
@@ -50,10 +108,16 @@
                 <ContextMenu>
                     <MenuItem Header="Open Captr" Click="OnTrayOpen" />
                     <Separator />
-                    <MenuItem Header="Start recording" Click="OnTrayStart" />
-                    <MenuItem Header="Pause" Click="OnTrayPause" />
-                    <MenuItem Header="Resume" Click="OnTrayResume" />
-                    <MenuItem Header="Stop" Click="OnTrayStop" />
+                    <!--
+                        IsEnabled is set from code in ApplyStatus, not bound. A
+                        ContextMenu lives in its own visual tree, so a RelativeSource
+                        binding up to the page finds no ancestor and silently resolves
+                        to null - which is how these items ended up always clickable.
+                    -->
+                    <MenuItem x:Name="TrayStartItem" Header="Start recording" Click="OnTrayStart" />
+                    <MenuItem x:Name="TrayPauseItem" Header="Pause" Click="OnTrayPause" />
+                    <MenuItem x:Name="TrayResumeItem" Header="Resume" Click="OnTrayResume" />
+                    <MenuItem x:Name="TrayStopItem" Header="Stop" Click="OnTrayStop" />
                     <Separator />
                     <MenuItem Header="Quit" Click="OnTrayQuit" />
                 </ContextMenu>

@@ -8,7 +8,7 @@ UI / CLI ──► IpcClient ──► \\.\pipe\captr-host-<user-sid-hash> ─�
 ```
 
 - **IpcProtocol** — the wire format: a 4-byte little-endian length prefix followed
-  by one UTF-8 JSON envelope `{ "v": 1, "kind": "...", "payload": { … } }`, plus
+  by one UTF-8 JSON envelope `{ "v": 3, "kind": "...", "payload": { … } }`, plus
   the typed request/response records for every operation.
 - **IpcServer** — accepts connections (one task per client), enforces the
   handshake, dispatches requests to the host, answers unknown kinds with an error

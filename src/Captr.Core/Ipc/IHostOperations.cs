@@ -23,13 +23,14 @@ public interface IHostOperations
 
     Task<RecoverResponse> RecoverAsync(CancellationToken cancellationToken);
 
-    Task<ListDeliveriesResponse> ListDeliveriesAsync(CancellationToken cancellationToken);
+    Task<ListTransfersResponse> ListTransfersAsync(CancellationToken cancellationToken);
 
-    Task<StateResponse> RetryDeliveryAsync(RetryDeliveryRequest request, CancellationToken cancellationToken);
+    Task<StateResponse> RetryTransferAsync(RetryTransferRequest request, CancellationToken cancellationToken);
+
+    /// <summary>Stop a queued, running, or backing-off transfer.</summary>
+    Task<StateResponse> CancelTransferAsync(CancelTransferRequest request, CancellationToken cancellationToken);
 
     Task<ResendResponse> ResendAsync(ResendRequest request, CancellationToken cancellationToken);
-
-    Task<ClipResponse> ClipAsync(ClipRequest request, CancellationToken cancellationToken);
 
     Task<SetSettingsResponse> SetSettingsAsync(SetSettingsRequest request, CancellationToken cancellationToken);
 }

@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.Text.Json;
 
+using Captr.Core.Encoders;
 using Captr.Core.Ipc;
 using Captr.Core.Sessions;
 using Captr.Core.Settings;
@@ -54,13 +55,14 @@ public static class CliApplication
         root.Subcommands.Add(BuildRecordings(jsonOption));
         root.Subcommands.Add(BuildRecover(jsonOption));
         root.Subcommands.Add(BuildSettings(jsonOption));
-        root.Subcommands.Add(BuildDelivery(jsonOption));
+        root.Subcommands.Add(BuildTransfers(jsonOption));
         root.Subcommands.Add(BuildAuth());
         root.Subcommands.Add(BuildVersion(jsonOption));
+        root.Subcommands.Add(BuildDoctor(jsonOption));
 
         ParseResult parseResult = root.Parse(args);
 
-        // Honour our own documented contract (docs/cli.md): a usage error exits 2.
+        // Honour our own documented contract (docs/user-guide/command-line.md): a usage error exits 2.
         // System.CommandLine's default for parse failures is 1, which would make a
         // typo indistinguishable from a real recording failure in a scheduled task.
         if (parseResult.Errors.Count > 0)
@@ -81,13 +83,25 @@ public static class CliApplication
 
     private static Command BuildStart(Option<bool> jsonOption)
     {
-        var fpsOption = new Option<int?>("--fps") { Description = "Frame rate override for this session." };
-        var qualityOption = new Option<string?>("--quality") { Description = "Quality preset override (archival, sharp-text, balanced, compact)." };
+        var fpsOption = new Option<int?>("--fps")
+        {
+            Description = "Frame rate override for this session: " +
+                string.Join(", ", CaptureRates.All.Select(r => r.FramesPerSecond)) + ".",
+        };
+        var qualityOption = new Option<string?>("--quality")
+        {
+            Description = "Quality override: " + string.Join(", ", QualityLevels.All.Select(q => q.Name)) + ".",
+        };
+        var presetOption = new Option<string?>("--preset")
+        {
+            Description = "Speed preset override: " + string.Join(", ", SpeedPresets.All.Select(p => p.Name)) + ".",
+        };
         var labelOption = new Option<string?>("--label") { Description = "A label included in the output file name." };
 
         var command = new Command("start", "Start recording. Succeeds (without starting twice) when already recording.");
         command.Options.Add(fpsOption);
         command.Options.Add(qualityOption);
+        command.Options.Add(presetOption);
         command.Options.Add(labelOption);
         command.Options.Add(jsonOption);
 
@@ -99,6 +113,7 @@ public static class CliApplication
                 var request = new StartRequest(
                     parseResult.GetValue(fpsOption),
                     parseResult.GetValue(qualityOption),
+                    parseResult.GetValue(presetOption),
                     parseResult.GetValue(labelOption));
                 StartResponse response = await client.RequestAsync<StartResponse>(IpcKinds.Start, request, cancellationToken);
                 Emit(json, response, response.Message);
@@ -167,7 +182,7 @@ public static class CliApplication
                 ? "No recordings found."
                 : string.Join(Environment.NewLine, response.Recordings.Select(r =>
                     $"{r.StartedUtc.ToLocalTime():yyyy-MM-dd HH:mm}  {r.RecordedSpan:hh\\:mm\\:ss}  " +
-                    $"{r.TotalBytes / 1_000_000.0:F0} MB  gaps:{r.GapCount}  {(r.Finalized ? "finalised" : "NOT FINALISED")}  {r.Folder}"));
+                    $"{Common.ByteSize.Format(r.TotalBytes),9}  gaps:{r.GapCount}  {(r.Finalized ? "finalised" : "NOT FINALISED")}  {r.Folder}"));
             Emit(json, response, human);
             return ExitCodes.Success;
         });
@@ -188,49 +203,6 @@ public static class CliApplication
             return response.Intact ? ExitCodes.Success : ExitCodes.Error;
         });
         command.Subcommands.Add(verify);
-
-        // --- clip: stream-copy extraction at segment boundaries (SPEC §9) --------
-        var clipFolder = new Argument<string>("folder") { Description = "The session's working folder." };
-        var fromOption = new Option<int>("--from") { Description = "First segment number (1-based).", Required = true };
-        var toOption = new Option<int>("--to") { Description = "Last segment number (inclusive).", Required = true };
-        var clip = new Command("clip",
-            "Extract part of a recording by stream copy at segment boundaries — no re-encoding, so the picture is untouched.");
-        clip.Arguments.Add(clipFolder);
-        clip.Options.Add(fromOption);
-        clip.Options.Add(toOption);
-        clip.Options.Add(jsonOption);
-        clip.SetAction(async (parseResult, cancellationToken) =>
-        {
-            bool json = parseResult.GetValue(jsonOption);
-            return await WithHostAsync(startHostIfNeeded: true, json, async client =>
-            {
-                ClipResponse response = await client.RequestAsync<ClipResponse>(
-                    IpcKinds.Clip,
-                    new ClipRequest(parseResult.GetValue(clipFolder)!, parseResult.GetValue(fromOption), parseResult.GetValue(toOption)),
-                    cancellationToken);
-                Emit(json, response, response.Message);
-                return ExitCodes.Success;
-            }, cancellationToken);
-        });
-        command.Subcommands.Add(clip);
-
-        // --- segments: what can be clipped ---------------------------------------
-        var segmentsFolder = new Argument<string>("folder") { Description = "The session's working folder." };
-        var segments = new Command("segments", "List a recording's segments — the boundaries a clip can start and end on.");
-        segments.Arguments.Add(segmentsFolder);
-        segments.Options.Add(jsonOption);
-        segments.SetAction(async (parseResult, cancellationToken) =>
-        {
-            bool json = parseResult.GetValue(jsonOption);
-            IReadOnlyList<ClipCandidate> candidates = SegmentClipper.ListSegments(parseResult.GetValue(segmentsFolder)!);
-            string human = candidates.Count == 0
-                ? "No segments found (is this a finalised session folder?)."
-                : string.Join(Environment.NewLine, candidates.Select(c =>
-                    $"{c.Index,3}  starts {c.StartOffset:hh\\:mm\\:ss}  lasts {c.Duration:hh\\:mm\\:ss}  {c.FileName}"));
-            Emit(json, candidates, human);
-            return await Task.FromResult(candidates.Count == 0 ? ExitCodes.Error : ExitCodes.Success);
-        });
-        command.Subcommands.Add(segments);
 
         // --- resend: queue the outputs to every enabled destination (SPEC §9) ----
         var resendFolder = new Argument<string>("folder") { Description = "The session's working folder." };
@@ -289,12 +261,69 @@ public static class CliApplication
         get.SetAction(async (parseResult, cancellationToken) =>
         {
             CaptrSettings settings = new SettingsStore().Load();
-            await Console.Out.WriteLineAsync(JsonSerializer.Serialize(settings, JsonOptions));
+            await Console.Out.WriteLineAsync(JsonSerializer.Serialize(settings, SettingsStore.JsonOptions));
             return ExitCodes.Success;
         });
         command.Subcommands.Add(get);
 
-        var keyArgument = new Argument<string>("key") { Description = "Setting name, e.g. frameRate, qualityPreset, workingFolder." };
+        // ---- init ---------------------------------------------------------------
+        // Used by the installer so a fresh machine has a real settings.json rather
+        // than nothing until the user first opens Settings and saves. Doing it
+        // through the CLI rather than writing JSON from the installer script means
+        // the defaults, the schema version, and the validation all come from ONE
+        // place and cannot drift from the product.
+        var workingFolderOption = new Option<string?>("--working-folder")
+        {
+            Description = "Where recordings are written. Omit to use the default.",
+        };
+
+        var init = new Command(
+            "init",
+            "Create settings.json with defaults if it does not exist yet. Never overwrites an existing file.");
+        init.Options.Add(workingFolderOption);
+        init.Options.Add(jsonOption);
+        init.SetAction(async (parseResult, cancellationToken) =>
+        {
+            bool json = parseResult.GetValue(jsonOption);
+            string path = SettingsStore.DefaultSettingsPath();
+
+            if (File.Exists(path))
+            {
+                // Idempotent BY DESIGN: an upgrade re-runs this, and a user's
+                // configuration surviving an upgrade matters far more than defaults
+                // being fresh.
+                await Console.Out.WriteLineAsync(json
+                    ? JsonSerializer.Serialize(new { path, created = false }, JsonOptions)
+                    : $"Settings already exist at {path}; left unchanged.");
+                return ExitCodes.Success;
+            }
+
+            CaptrSettings settings = CaptrSettings.CreateDefault();
+            if (parseResult.GetValue(workingFolderOption) is { Length: > 0 } workingFolder)
+            {
+                settings = settings with { WorkingFolder = workingFolder };
+            }
+
+            try
+            {
+                new SettingsStore().Save(settings);
+            }
+            catch (SettingsValidationException exception)
+            {
+                await Console.Error.WriteLineAsync(
+                    "Could not create settings: " +
+                    string.Join("; ", exception.Errors.Select(e => $"{e.Field} — {e.Message}")));
+                return ExitCodes.Error;
+            }
+
+            await Console.Out.WriteLineAsync(json
+                ? JsonSerializer.Serialize(new { path, created = true }, JsonOptions)
+                : $"Created {path} with default settings.");
+            return ExitCodes.Success;
+        });
+        command.Subcommands.Add(init);
+
+        var keyArgument = new Argument<string>("key") { Description = "Setting name, e.g. frameRate, quality, speedPreset, workingFolder." };
         var valueArgument = new Argument<string>("value") { Description = "New value." };
         var set = new Command("set", "Change one setting (validated before saving).");
         set.Arguments.Add(keyArgument);
@@ -372,6 +401,52 @@ public static class CliApplication
         return command;
     }
 
+    // ---- doctor -----------------------------------------------------------------
+
+    /// <summary>
+    /// The same health checks the Diagnostics page shows, on the command line.
+    /// </summary>
+    /// <remarks>
+    /// Exits 1 when any check is a Problem, so a script or a deployment step can ask
+    /// "is this machine ready to record?" and branch on the answer instead of parsing
+    /// text. Attention-level findings do not fail: they are worth reading, not worth
+    /// stopping for.
+    /// </remarks>
+    private static Command BuildDoctor(Option<bool> jsonOption)
+    {
+        var command = new Command(
+            "doctor",
+            "Check this installation and report anything that would stop it recording or transferring.");
+        command.Options.Add(jsonOption);
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            IReadOnlyList<Diagnostics.HealthCheck> checks =
+                await Task.Run(Diagnostics.HealthReport.Run, cancellationToken);
+
+            if (parseResult.GetValue(jsonOption))
+            {
+                await Console.Out.WriteLineAsync(JsonSerializer.Serialize(checks, JsonOptions));
+            }
+            else
+            {
+                foreach (Diagnostics.HealthCheck check in checks)
+                {
+                    await Console.Out.WriteLineAsync(
+                        $"{check.Level.ToString().ToUpperInvariant(),-9} {check.Name,-14} {check.Finding}");
+                    if (check.WhatToDo is { } fix)
+                    {
+                        await Console.Out.WriteLineAsync($"{new string(' ', 24)}{fix}");
+                    }
+                }
+            }
+
+            return checks.Any(c => c.Level == Diagnostics.HealthLevel.Problem)
+                ? ExitCodes.Error
+                : ExitCodes.Success;
+        });
+        return command;
+    }
+
     // ---- version ----------------------------------------------------------------
 
     private static Command BuildVersion(Option<bool> jsonOption)
@@ -397,11 +472,11 @@ public static class CliApplication
         return command;
     }
 
-    // ---- delivery ---------------------------------------------------------------
+    // ---- transfer ---------------------------------------------------------------
 
-    private static Command BuildDelivery(Option<bool> jsonOption)
+    private static Command BuildTransfers(Option<bool> jsonOption)
     {
-        var command = new Command("delivery", "Inspect and retry transfers to destinations.");
+        var command = new Command("transfers", "Inspect, retry, and stop transfers to destinations.");
 
         var list = new Command("list", "Every pending, failed, and completed transfer with attempts and the server's error.");
         list.Options.Add(jsonOption);
@@ -410,11 +485,11 @@ public static class CliApplication
             bool json = parseResult.GetValue(jsonOption);
             return await WithHostAsync(startHostIfNeeded: true, json, async client =>
             {
-                ListDeliveriesResponse response = await client.RequestAsync<ListDeliveriesResponse>(
-                    IpcKinds.ListDeliveries, null, cancellationToken);
-                string human = response.Deliveries.Count == 0
-                    ? "No deliveries."
-                    : string.Join(Environment.NewLine, response.Deliveries.Select(d =>
+                ListTransfersResponse response = await client.RequestAsync<ListTransfersResponse>(
+                    IpcKinds.ListTransfers, null, cancellationToken);
+                string human = response.Transfers.Count == 0
+                    ? "No transfers."
+                    : string.Join(Environment.NewLine, response.Transfers.Select(d =>
                         $"#{d.Id}  {d.State,-12} attempts:{d.Attempts}  {Path.GetFileName(d.OutputPath)} → {d.DestinationName}" +
                         (d.LastError is null ? string.Empty : Environment.NewLine + $"      server said: {d.LastError}")));
                 Emit(json, response, human);
@@ -423,7 +498,7 @@ public static class CliApplication
         });
         command.Subcommands.Add(list);
 
-        var idArgument = new Argument<long>("id") { Description = "The delivery id from 'captr delivery list'." };
+        var idArgument = new Argument<long>("id") { Description = "The transfer id from 'captr transfers list'." };
         var retry = new Command("retry", "Put a failed transfer back in the queue.");
         retry.Arguments.Add(idArgument);
         retry.Options.Add(jsonOption);
@@ -433,12 +508,31 @@ public static class CliApplication
             return await WithHostAsync(startHostIfNeeded: true, json, async client =>
             {
                 StateResponse response = await client.RequestAsync<StateResponse>(
-                    IpcKinds.RetryDelivery, new RetryDeliveryRequest(parseResult.GetValue(idArgument)), cancellationToken);
+                    IpcKinds.RetryTransfer, new RetryTransferRequest(parseResult.GetValue(idArgument)), cancellationToken);
                 Emit(json, response, response.Message);
                 return ExitCodes.Success;
             }, cancellationToken);
         });
         command.Subcommands.Add(retry);
+
+        var stopId = new Argument<long>("id") { Description = "The transfer id from 'captr transfers list'." };
+        var stop = new Command(
+            "stop",
+            "Stop a queued or running transfer. It stays in the list and can be retried; nothing local is deleted.");
+        stop.Arguments.Add(stopId);
+        stop.Options.Add(jsonOption);
+        stop.SetAction(async (parseResult, cancellationToken) =>
+        {
+            bool json = parseResult.GetValue(jsonOption);
+            return await WithHostAsync(startHostIfNeeded: true, json, async client =>
+            {
+                StateResponse response = await client.RequestAsync<StateResponse>(
+                    IpcKinds.CancelTransfer, new CancelTransferRequest(parseResult.GetValue(stopId)), cancellationToken);
+                Emit(json, response, response.Message);
+                return ExitCodes.Success;
+            }, cancellationToken);
+        });
+        command.Subcommands.Add(stop);
 
         return command;
     }
@@ -605,33 +699,8 @@ public static class CliApplication
     {
         public static async Task<ListRecordingsResponse> ListRecordingsAsync(CancellationToken cancellationToken)
         {
-            var summaries = new List<RecordingSummary>();
-            string root = new SettingsStore().Load().WorkingFolder;
-            if (Directory.Exists(root))
-            {
-                foreach (string folder in Directory.GetDirectories(root).OrderDescending(StringComparer.Ordinal))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    string journalPath = Path.Combine(folder, SessionJournal.FileName);
-                    if (!File.Exists(journalPath))
-                    {
-                        continue;
-                    }
-
-                    IReadOnlyList<JournalEvent> events = SessionJournal.ReadAll(journalPath);
-                    if (events.OfType<SessionStarted>().FirstOrDefault() is not { } start)
-                    {
-                        continue;
-                    }
-
-                    SessionFinalized? finalized = events.OfType<SessionFinalized>().FirstOrDefault();
-                    long bytes = Directory.EnumerateFiles(folder, "*.mkv").Sum(f => new FileInfo(f).Length);
-                    summaries.Add(new RecordingSummary(
-                        folder, start.TimestampUtc, finalized?.RecordedSpan ?? TimeSpan.Zero,
-                        bytes, finalized?.GapCount ?? 0, finalized is not null));
-                }
-            }
-
+            IReadOnlyList<RecordingSummary> summaries = RecordingCatalog.Scan(
+                new SettingsStore().Load().WorkingFolder, cancellationToken);
             return await Task.FromResult(new ListRecordingsResponse(summaries));
         }
 

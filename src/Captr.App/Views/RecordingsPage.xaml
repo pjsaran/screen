@@ -3,58 +3,165 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:theme="clr-namespace:Captr.App.Theme"
+    xmlns:views="clr-namespace:Captr.App.Views"
     Title="Recordings">
-    <DockPanel Margin="24">
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
-            <TextBlock Text="Recordings" FontSize="24" FontWeight="SemiBold" VerticalAlignment="Center" />
-            <ui:Button Content="Refresh" Margin="16,0,0,0" Command="{Binding RefreshCommand}" />
-            <TextBlock Text="{Binding Message}" Margin="16,0,0,0" VerticalAlignment="Center" Opacity="0.8" />
-        </StackPanel>
-        <ItemsControl ItemsSource="{Binding Recordings}">
-            <ItemsControl.Template>
-                <ControlTemplate TargetType="ItemsControl">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <ItemsPresenter />
-                    </ScrollViewer>
-                </ControlTemplate>
-            </ItemsControl.Template>
-            <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                    <Border Margin="0,0,0,8" Padding="12" CornerRadius="8"
-                            Background="{DynamicResource ControlFillColorDefaultBrush}">
-                        <StackPanel>
-                            <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-                            <TextBlock Opacity="0.8" Margin="0,2,0,0">
-                                <Run Text="{Binding Started, Mode=OneWay}" /> ·
-                                <Run Text="{Binding Duration, Mode=OneWay}" /> ·
-                                <Run Text="{Binding Size, Mode=OneWay}" /> ·
-                                <Run Text="{Binding Coverage, Mode=OneWay}" /> ·
-                                <Run Text="{Binding State, Mode=OneWay}" />
-                            </TextBlock>
-                            <TextBlock Text="{Binding VerifyResult}" Margin="0,4,0,0" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ActionResult}" Margin="0,4,0,0" TextWrapping="Wrap" Opacity="0.85" />
-                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                <ui:Button Content="Open folder" FontSize="12"
-                                           Command="{Binding DataContext.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=Page}}"
-                                           CommandParameter="{Binding}" />
-                                <ui:Button Content="Play" FontSize="12" Margin="8,0,0,0"
-                                           Command="{Binding DataContext.PlayCommand, RelativeSource={RelativeSource AncestorType=Page}}"
-                                           CommandParameter="{Binding}" />
-                                <ui:Button Content="Verify" FontSize="12" Margin="8,0,0,0"
-                                           Command="{Binding DataContext.VerifyCommand, RelativeSource={RelativeSource AncestorType=Page}}"
-                                           CommandParameter="{Binding}" />
-                                <ui:Button Content="Extract clip…" FontSize="12" Margin="8,0,0,0"
-                                           Click="OnClipClicked" Tag="{Binding}" />
-                                <ui:Button Content="Re-send" FontSize="12" Margin="8,0,0,0"
-                                           Command="{Binding DataContext.ResendCommand, RelativeSource={RelativeSource AncestorType=Page}}"
-                                           CommandParameter="{Binding}" />
-                                <ui:Button Content="Delete…" FontSize="12" Margin="8,0,0,0" Appearance="Danger"
-                                           Click="OnDeleteClicked" Tag="{Binding}" />
-                            </StackPanel>
-                        </StackPanel>
+    <Page.Resources>
+        <!-- An action's result reads as ordinary detail when it succeeded and in the
+             error colour when it did not, so a failure cannot be skimmed past. -->
+        <Style x:Key="ActionResultText" TargetType="TextBlock" BasedOn="{StaticResource CaptionText}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActionIsError}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Page.Resources>
+    <!--
+        A table, matching Transfers exactly: same card, same header strip, same row
+        height, same column rhythm. The two pages show the same KIND of thing — a list
+        of items with an action each — so moving between them should not mean
+        re-reading the layout. The list keeps itself current (see RecordingsViewModel);
+        Refresh is a convenience, not a requirement.
+    -->
+    <Grid Margin="{StaticResource PagePadding}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <views:PageHeader Grid.Row="0" Title="Recordings">
+            <views:PageHeader.Actions>
+                <ui:Button Style="{StaticResource ActionButton}" Content="Refresh"
+                           Command="{Binding RefreshCommand}" />
+            </views:PageHeader.Actions>
+        </views:PageHeader>
+
+        <Grid Grid.Row="1">
+            <Border Style="{StaticResource TableCard}" VerticalAlignment="Top"
+                    Visibility="{Binding HasAny, Converter={StaticResource BoolToVisibility}}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- ==== Column headers ============================================
+                         The widths here and in the rows below are the SAME literals on
+                         purpose: a Grid per row cannot share widths with a header
+                         outside it, so they are kept in step by being written once
+                         each and checked together. -->
+                    <Border Grid.Row="0" Style="{StaticResource TableHeader}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" MinWidth="200" />
+                                <ColumnDefinition Width="96" />
+                                <ColumnDefinition Width="86" />
+                                <ColumnDefinition Width="200" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" theme:Typo.Text="Recorded" Style="{StaticResource MicroLabel}" />
+                            <TextBlock Grid.Column="1" theme:Typo.Text="Length" Style="{StaticResource MicroLabel}" />
+                            <TextBlock Grid.Column="2" theme:Typo.Text="Size" Style="{StaticResource MicroLabel}" />
+                            <TextBlock Grid.Column="3" theme:Typo.Text="Action" Style="{StaticResource MicroLabel}"
+                                       HorizontalAlignment="Right" />
+                        </Grid>
                     </Border>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
-    </DockPanel>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Recordings}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource TableRow}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" MinWidth="200" />
+                                                    <ColumnDefinition Width="96" />
+                                                    <ColumnDefinition Width="86" />
+                                                    <ColumnDefinition Width="200" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Identity: when it was recorded, and where. -->
+                                                <StackPanel Grid.Column="0" VerticalAlignment="Center"
+                                                            Margin="0,0,10,0">
+                                                    <TextBlock Text="{Binding Started}"
+                                                               Style="{StaticResource BodyText}"
+                                                               TextWrapping="NoWrap" />
+                                                    <TextBlock Text="{Binding Name}" Style="{StaticResource MonoText}" />
+                                                </StackPanel>
+
+                                                <TextBlock Grid.Column="1" Text="{Binding Duration}"
+                                                           Style="{StaticResource FigureText}"
+                                                           VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="2" Text="{Binding Size}"
+                                                           Style="{StaticResource FigureText}"
+                                                           VerticalAlignment="Center" />
+
+                                                <!-- Play and Open are the everyday actions; Send
+                                                     again and Delete are occasional, so they live
+                                                     behind the "…" menu rather than crowd every row. -->
+                                                <StackPanel Grid.Column="3" Orientation="Horizontal"
+                                                            HorizontalAlignment="Right" VerticalAlignment="Center">
+                                                    <ui:Button Style="{StaticResource RowActionButton}" Content="Play"
+                                                               Appearance="Primary"
+                                                               Command="{Binding DataContext.PlayCommand,
+                                                                         RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                               CommandParameter="{Binding}"
+                                                               IsEnabled="{Binding IsFinalized}" />
+                                                    <ui:Button Style="{StaticResource RowActionButton}" Content="Open"
+                                                               Margin="6,0,0,0"
+                                                               ToolTip="Show this recording in File Explorer"
+                                                               Command="{Binding DataContext.OpenFolderCommand,
+                                                                         RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                               CommandParameter="{Binding}" />
+                                                    <!-- The menu items use Click, not Command. A
+                                                         ContextMenu lives in its own visual tree, so
+                                                         a {RelativeSource AncestorType=ItemsControl}
+                                                         binding inside one silently resolves to
+                                                         nothing and the item does nothing when
+                                                         clicked — which is exactly what "Send to
+                                                         destinations again" used to do. -->
+                                                    <ui:Button Style="{StaticResource OverflowButton}"
+                                                               Content="&#x2026;" Margin="6,0,0,0"
+                                                               ToolTip="More actions"
+                                                               Click="OnMoreClicked" Tag="{Binding}">
+                                                        <ui:Button.ContextMenu>
+                                                            <ContextMenu>
+                                                                <MenuItem Header="TRANSFER"
+                                                                          Click="OnResendClicked"
+                                                                          Tag="{Binding}"
+                                                                          IsEnabled="{Binding CanResend}"
+                                                                          ToolTip="{Binding ResendHint}" />
+                                                                <Separator />
+                                                                <MenuItem Header="DELETE"
+                                                                          Click="OnDeleteClicked" Tag="{Binding}"
+                                                                          ToolTip="Delete this recording from disk. Asks you to type its name first." />
+                                                            </ContextMenu>
+                                                        </ui:Button.ContextMenu>
+                                                    </ui:Button>
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <!-- The result of the last action, in place. Takes no
+                                                 space until there is something to report. -->
+                                            <TextBlock Text="{Binding ActionResult}" Margin="0,6,0,0"
+                                                       Style="{StaticResource ActionResultText}"
+                                                       Visibility="{Binding ActionResult,
+                                                                    Converter={StaticResource NonEmptyToVisibility}}" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <!-- Declared AFTER the table so it draws on top of it. -->
+            <TextBlock Text="{Binding Message}" Style="{StaticResource CaptionText}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
+                       MaxWidth="420"
+                       Visibility="{Binding Message, Converter={StaticResource NonEmptyToVisibility}}" />
+        </Grid>
+    </Grid>
 </Page>

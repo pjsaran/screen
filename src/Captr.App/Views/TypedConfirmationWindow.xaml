@@ -1,18 +1,35 @@
-<Window
+<ui:FluentWindow
     x:Class="Captr.App.Views.TypedConfirmationWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     Title="Confirm"
-    Width="460" SizeToContent="Height" WindowStartupLocation="CenterOwner"
-    ResizeMode="NoResize" ShowInTaskbar="False">
-    <StackPanel Margin="20">
-        <TextBlock x:Name="TitleText" FontSize="18" FontWeight="SemiBold" />
-        <TextBlock x:Name="ExplanationText" Margin="0,10,0,0" TextWrapping="Wrap" />
-        <TextBox x:Name="ConfirmationBox" Margin="0,14,0,0" TextChanged="OnTextChanged" />
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-            <Button Content="Cancel" MinWidth="90" IsCancel="True" />
-            <Button x:Name="ConfirmButton" Content="Delete" MinWidth="90" Margin="8,0,0,0"
-                    IsEnabled="False" Click="OnConfirmClicked" />
+    Width="480" SizeToContent="Height"
+    WindowStartupLocation="CenterOwner"
+    ResizeMode="NoResize" ShowInTaskbar="False"
+    Icon="pack://application:,,,/Assets/captr.ico"
+    WindowBackdropType="Mica"
+    ExtendsContentIntoTitleBar="True"
+    WindowCornerPreference="Round">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="Confirm" ShowMinimize="False" ShowMaximize="False" />
+
+        <StackPanel Grid.Row="1" Margin="20,4,20,20">
+            <TextBlock x:Name="TitleText" Style="{StaticResource DisplayText}" />
+            <TextBlock x:Name="ExplanationText" Style="{StaticResource BodyText}" Margin="0,10,0,0" />
+            <ui:TextBox x:Name="ConfirmationBox" Margin="0,14,0,0" TextChanged="OnTextChanged" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                <ui:Button Style="{StaticResource ActionButton}" Content="Cancel" MinWidth="90" IsCancel="True" />
+                <!-- Danger appearance and disabled-until-typed: deleting footage is
+                     the one irreversible thing Captr does (SPEC §7/§13). -->
+                <ui:Button Style="{StaticResource ActionButton}" x:Name="ConfirmButton" Content="Delete" MinWidth="90" Margin="6,0,0,0"
+                           Appearance="Danger" IsEnabled="False" Click="OnConfirmClicked" />
+            </StackPanel>
         </StackPanel>
-    </StackPanel>
-</Window>
+    </Grid>
+</ui:FluentWindow>

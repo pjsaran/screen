@@ -1,11 +1,10 @@
-using Captr.Core.Delivery;
 using Captr.Core.Ipc;
 using Captr.Core.Naming;
 using Captr.Core.Sessions;
 using Captr.Core.Settings;
 using Captr.Core.Supervision;
+using Captr.Core.Transfers;
 using Captr.Core.WindowsEvents;
-
 using Serilog;
 
 namespace Captr.Core.Hosting;
@@ -21,8 +20,8 @@ public sealed class HostService : IHostOperations
 {
     private readonly SettingsStore _settingsStore;
     private readonly MessageOnlyWindow? _systemEvents;
-    private readonly DeliveryQueue _deliveryQueue;
-    private readonly DeliveryWorker? _deliveryWorker;
+    private readonly TransferQueue _transferQueue;
+    private readonly TransferWorker? _transferWorker;
     private readonly ILogger _log;
     private readonly Lock _gate = new();
 
@@ -34,20 +33,20 @@ public sealed class HostService : IHostOperations
         SettingsStore settingsStore,
         MessageOnlyWindow? systemEvents,
         ILogger log,
-        DeliveryQueue? deliveryQueue = null,
-        DeliveryWorker? deliveryWorker = null)
+        TransferQueue? transferQueue = null,
+        TransferWorker? transferWorker = null)
     {
         _settingsStore = settingsStore;
         _systemEvents = systemEvents;
         _log = log.ForContext<HostService>();
-        _deliveryQueue = deliveryQueue ?? new DeliveryQueue();
-        _deliveryWorker = deliveryWorker;
+        _transferQueue = transferQueue ?? new TransferQueue();
+        _transferWorker = transferWorker;
     }
 
     /// <summary>When the host last did anything — feeds the idle-exit timer.</summary>
     public DateTimeOffset LastActivityUtc => _lastActivityUtc;
 
-    /// <summary>True while a session is running/finalising or deliveries are still
+    /// <summary>True while a session is running/finalising or transfers are still
     /// draining — either keeps the host from its idle exit.</summary>
     public bool IsBusy
     {
@@ -61,7 +60,7 @@ public sealed class HostService : IHostOperations
                 }
             }
 
-            return _deliveryWorker?.HasPendingWork == true;
+            return _transferWorker?.HasPendingWork == true;
         }
     }
 
@@ -82,7 +81,8 @@ public sealed class HostService : IHostOperations
         CaptrSettings settings = _settingsStore.Load();
         var planner = new SessionPlanner(_log);
         (RecordingSession.SessionContext context, SessionStarted startEvent) = await planner.PlanAsync(
-            settings, request.FrameRate, request.QualityPreset, request.Label, cancellationToken).ConfigureAwait(false);
+            settings, request.FrameRate, request.Quality, request.SpeedPreset, request.Label, cancellationToken)
+            .ConfigureAwait(false);
 
         RecordingSession session = RecordingSession.Create(context, startEvent, _log);
         if (_systemEvents is not null)
@@ -176,43 +176,16 @@ public sealed class HostService : IHostOperations
             session.Context.WorkingFolder,
             DiskMinutes(session),
             gapCount,
-            coverage));
+            coverage,
+            session.CurrentQuality,
+            session.CurrentSpeedPreset));
     }
 
     public Task<ListRecordingsResponse> ListRecordingsAsync(CancellationToken cancellationToken)
     {
         Touch();
-        var summaries = new List<RecordingSummary>();
-        string root = _settingsStore.Load().WorkingFolder;
-        if (Directory.Exists(root))
-        {
-            foreach (string folder in Directory.GetDirectories(root).OrderDescending(StringComparer.Ordinal))
-            {
-                string journalPath = Path.Combine(folder, SessionJournal.FileName);
-                if (!File.Exists(journalPath))
-                {
-                    continue;
-                }
-
-                IReadOnlyList<JournalEvent> events = SessionJournal.ReadAll(journalPath);
-                if (events.OfType<SessionStarted>().FirstOrDefault() is not { } start)
-                {
-                    continue;
-                }
-
-                SessionFinalized? finalized = events.OfType<SessionFinalized>().FirstOrDefault();
-                long bytes = Directory.EnumerateFiles(folder, "*.mkv").Sum(f => new FileInfo(f).Length);
-                summaries.Add(new RecordingSummary(
-                    folder,
-                    start.TimestampUtc,
-                    finalized?.RecordedSpan ?? TimeSpan.Zero,
-                    bytes,
-                    finalized?.GapCount ?? 0,
-                    finalized is not null));
-            }
-        }
-
-        return Task.FromResult(new ListRecordingsResponse(summaries));
+        return Task.FromResult(new ListRecordingsResponse(
+            RecordingCatalog.Scan(_settingsStore.Load().WorkingFolder, cancellationToken)));
     }
 
     public async Task<VerifyResponse> VerifyAsync(VerifyRequest request, CancellationToken cancellationToken)
@@ -260,21 +233,59 @@ public sealed class HostService : IHostOperations
         return reports;
     }
 
-    public Task<ListDeliveriesResponse> ListDeliveriesAsync(CancellationToken cancellationToken)
+    public Task<ListTransfersResponse> ListTransfersAsync(CancellationToken cancellationToken)
     {
         Touch();
-        return Task.FromResult(new ListDeliveriesResponse(
+        return Task.FromResult(new ListTransfersResponse(
         [
-            .. _deliveryQueue.List().Select(i => new DeliverySummary(
+            .. _transferQueue.ListRecent(DateTimeOffset.UtcNow).Select(i => new TransferSummary(
                 i.Id, i.OutputPath, i.DestinationName, i.State, i.Attempts, i.NextAttemptUtc, i.LastError)),
         ]));
     }
 
-    public Task<StateResponse> RetryDeliveryAsync(RetryDeliveryRequest request, CancellationToken cancellationToken)
+    public Task<StateResponse> RetryTransferAsync(RetryTransferRequest request, CancellationToken cancellationToken)
     {
         Touch();
-        _deliveryQueue.Retry(request.Id);
-        return Task.FromResult(new StateResponse("pending", $"Delivery {request.Id} queued for retry."));
+        _transferQueue.Retry(request.Id);
+        return Task.FromResult(new StateResponse("pending", $"Transfer {request.Id} queued for retry."));
+    }
+
+    /// <summary>
+    /// Puts transfers that stopped on a bad credential back in the queue.
+    /// </summary>
+    /// <remarks>
+    /// A <c>paused-auth</c> row is deliberately excluded from the queue's due list,
+    /// so nothing picks it up again by itself — which means that without this,
+    /// replacing an expired secret fixed nothing until every affected transfer was
+    /// retried by hand. Called when settings are saved (the moment a new secret is
+    /// stored) and once when a host starts. Re-arming costs one attempt, and a
+    /// credential that is still wrong simply pauses again.
+    /// </remarks>
+    private void ReArmAuthPausedTransfers()
+    {
+        try
+        {
+            _transferQueue.ResumeAuthPaused();
+        }
+        catch (Exception exception) when (exception is IOException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            _log.Warning(exception, "Could not re-arm transfers waiting on a credential");
+        }
+    }
+
+    /// <summary>
+    /// Stops a transfer the user has given up on. The row stops retrying by itself
+    /// and keeps its last error; Retry is the only thing that starts it again.
+    /// Nothing local is touched — the recording is still on disk either way.
+    /// </summary>
+    public Task<StateResponse> CancelTransferAsync(CancelTransferRequest request, CancellationToken cancellationToken)
+    {
+        Touch();
+        _transferQueue.Cancel(request.Id);
+        _log.Information("Transfer {Id} stopped at the user's request", request.Id);
+        return Task.FromResult(new StateResponse(
+            TransferQueue.StateCancelled,
+            $"Transfer {request.Id} stopped. It will not retry until you press Retry."));
     }
 
     /// <summary>
@@ -292,6 +303,7 @@ public sealed class HostService : IHostOperations
         if (session is null)
         {
             _settingsStore.Save(request.Settings);
+            ReArmAuthPausedTransfers();
             return Task.FromResult(new SetSettingsResponse(true, false, "Saved."));
         }
 
@@ -301,7 +313,8 @@ public sealed class HostService : IHostOperations
         CaptrSettings live = current with
         {
             FrameRate = session.CurrentFrameRate,
-            QualityPreset = session.CurrentQualityPreset,
+            Quality = session.CurrentQuality,
+            SpeedPreset = session.CurrentSpeedPreset,
             ExcludedDisplayIds = session.CurrentExcludedDisplayIds,
         };
 
@@ -312,6 +325,7 @@ public sealed class HostService : IHostOperations
         }
 
         _settingsStore.Save(request.Settings);
+        ReArmAuthPausedTransfers();
 
         if (!verdict.DegradesRecording)
         {
@@ -346,7 +360,14 @@ public sealed class HostService : IHostOperations
             return Task.FromResult(new ResendResponse(0, "No destinations are enabled, so there is nowhere to send."));
         }
 
+        // Names and folders resolve against WHEN THE RECORDING WAS MADE, not now, so
+        // a recording sent again next week still lands in its own dated folder. The
+        // journal is where that information lives; without it the tokens would
+        // silently expand to today.
+        NamingContext? context = RecordingCatalog.ReadNamingContext(request.Folder);
+
         int queued = 0;
+        var skipped = new List<string>();
         foreach (HashedFile output in record.Outputs)
         {
             string path = Path.Combine(request.Folder, output.FileName);
@@ -355,37 +376,51 @@ public sealed class HostService : IHostOperations
                 continue;
             }
 
+            IReadOnlyList<string> alreadyThere = _transferQueue.CompletedDestinationsFor(path);
             foreach (DestinationSettings destination in destinations)
             {
-                _deliveryQueue.Enqueue(path, destination.Name);
+                // Sending a second copy to a destination that already has it would
+                // land beside the first as "name (2)" and mean nothing. Skipping is
+                // what makes this button safe to press twice.
+                if (alreadyThere.Contains(destination.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    skipped.Add(destination.Name);
+                    continue;
+                }
+
+                Enqueue(path, destination, context, Path.GetExtension(path));
                 queued++;
             }
         }
 
         _log.Information("Re-send queued {Count} transfer(s) for {Folder}", queued, request.Folder);
-        return Task.FromResult(new ResendResponse(queued,
-            queued == 0
-                ? "Nothing to re-send — the output files are no longer in the working folder."
-                : $"Queued {queued} transfer(s) across {destinations.Count} destination(s)."));
+        return Task.FromResult(new ResendResponse(queued, DescribeResend(queued, destinations.Count, skipped)));
     }
 
-    public async Task<ClipResponse> ClipAsync(ClipRequest request, CancellationToken cancellationToken)
+    /// <summary>Plain English for what a re-send actually did, including the case
+    /// where every destination already has the file and nothing was queued.</summary>
+    private static string DescribeResend(int queued, int destinationCount, List<string> skipped)
     {
-        Touch();
-        var clipper = new SegmentClipper(FfmpegLocator.FindFfmpeg(), FfmpegLocator.FindFfprobe(), _log);
-        string clipPath = await clipper
-            .ExtractAsync(request.Folder, request.FirstSegment, request.LastSegment, cancellationToken)
-            .ConfigureAwait(false);
-        return new ClipResponse(clipPath,
-            $"Clip written to {clipPath} (stream copy — no re-encoding, so the picture is untouched).");
+        string skippedText = skipped.Count == 0
+            ? ""
+            : $" Already at: {string.Join(", ", skipped.Distinct(StringComparer.OrdinalIgnoreCase))}.";
+
+        if (queued > 0)
+        {
+            return $"Queued {queued} transfer(s) across {destinationCount} destination(s).{skippedText}";
+        }
+
+        return skipped.Count > 0
+            ? $"Nothing to send — every enabled destination already has this recording.{skippedText}"
+            : "Nothing to send — the output files are no longer in the working folder.";
     }
 
     /// <summary>
     /// The stop-side hand-off (SPEC §7): rename each finalised output by the user's
     /// pattern (sanitised, collision-suffixed — within the working folder, so
-    /// nothing leaves it) and enqueue one delivery per enabled destination.
+    /// nothing leaves it) and enqueue one transfer per enabled destination.
     /// Failures here are logged, never thrown — the recording itself is already
-    /// safe on disk, and delivery problems must not look like recording problems.
+    /// safe on disk, and transfer problems must not look like recording problems.
     /// </summary>
     private void HandleFinalized(FinalizationResult result)
     {
@@ -417,13 +452,33 @@ public sealed class HostService : IHostOperations
                 string workingFolder = Path.GetDirectoryName(output)!;
                 string finalPath = OutputNamer.ResolveCollision(workingFolder, desiredName);
                 File.Move(output, finalPath);
+
+                // The integrity record was written against the pipeline's intermediate
+                // name; point it at the name the file now has. Skipping this makes
+                // `recordings verify` report EVERY finalised recording as missing.
+                if (!IntegrityRecord.RecordOutputRename(
+                        workingFolder, Path.GetFileName(output), Path.GetFileName(finalPath)))
+                {
+                    _log.Warning(
+                        "Renamed {Output} to {Final} but its integrity record could not be updated; " +
+                        "verification of this recording will report the output as missing",
+                        Path.GetFileName(output), Path.GetFileName(finalPath));
+                }
+
                 _log.Information("Output named {Final}", finalPath);
 
                 foreach (DestinationSettings destination in settings.Destinations.Where(d => d.Enabled))
                 {
-                    long id = _deliveryQueue.Enqueue(finalPath, destination.Name);
-                    _log.Information("Delivery {Id} queued: {File} → {Destination}", id, finalPath, destination.Name);
+                    Enqueue(finalPath, destination, context, Path.GetExtension(finalPath));
                 }
+            }
+
+            if (!settings.Destinations.Any(d => d.Enabled))
+            {
+                // A workflow with no destinations is a supported choice, not a
+                // misconfiguration — say so plainly instead of staying silent.
+                _log.Information(
+                    "No destinations are enabled; the recording stays in its working folder and nothing is transferred");
             }
         }
         catch (Exception exception) when (exception is IOException or SettingsValidationException)
@@ -432,6 +487,87 @@ public sealed class HostService : IHostOperations
         }
 
         Touch();
+    }
+
+    /// <summary>
+    /// Queues one file for one destination, resolving BOTH the name it takes there
+    /// and the folder it lands in.
+    /// </summary>
+    /// <remarks>
+    /// Both are resolved here, once, and stored on the queue row rather than being
+    /// recomputed on each attempt. A destination folder may contain date tokens
+    /// (<c>\\archive\recordings\{date:yyyy-MM}</c>), and a transfer that fails at
+    /// 23:59 and retries at 00:01 must land where it was meant to, not in tomorrow.
+    /// </remarks>
+    private void Enqueue(
+        string sourcePath, DestinationSettings destination, NamingContext? context, string extension)
+    {
+        string? targetName = context is null ? null : BuildTargetName(destination, context, extension);
+        string? targetFolder = ResolveTargetFolder(destination, context);
+
+        long id = _transferQueue.Enqueue(sourcePath, destination.Name, targetName, targetFolder);
+        _log.Information("Transfer {Id} queued: {File} → {Destination}{Folder} as {Name}",
+            id, sourcePath, destination.Name,
+            targetFolder is null ? "" : " (" + targetFolder + ")",
+            targetName ?? Path.GetFileName(sourcePath));
+    }
+
+    /// <summary>
+    /// The destination folder with its date tokens expanded, or null when it has
+    /// none (in which case the worker uses the destination's folder as configured).
+    /// </summary>
+    private string? ResolveTargetFolder(DestinationSettings destination, NamingContext? context)
+    {
+        string? configured = destination.Kind == DestinationKind.Folder
+            ? destination.FolderPath
+            : destination.SharePointFolder;
+
+        if (context is null
+            || string.IsNullOrWhiteSpace(configured)
+            || !configured.Contains('{', StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        try
+        {
+            return OutputNamer.ExpandFolderPath(configured, context);
+        }
+        catch (ArgumentException exception)
+        {
+            _log.Error(exception,
+                "Destination {Destination} has an invalid folder pattern; sending to the folder as written instead",
+                destination.Name);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The name a recording takes at ONE destination, from that destination's own
+    /// naming pattern. Returns null when the destination has no pattern, which means
+    /// "keep the recording's own name" — the common case.
+    /// </summary>
+    private string? BuildTargetName(DestinationSettings destination, NamingContext context, string extension)
+    {
+        if (string.IsNullOrWhiteSpace(destination.FileNamePattern))
+        {
+            return null;
+        }
+
+        try
+        {
+            string name = OutputNamer.BuildFileName(destination.FileNamePattern, context);
+            return Path.HasExtension(name) ? name : name + extension;
+        }
+        catch (ArgumentException exception)
+        {
+            // A bad pattern must never cost a transfer: fall back to the local name
+            // and say loudly which destination needs fixing.
+            _log.Error(exception,
+                "Destination {Destination} has an invalid file-name pattern; transferring under the recording's own name instead",
+                destination.Name);
+            return null;
+        }
     }
 
     private static TimeZoneInfo FindTimeZone(string id)

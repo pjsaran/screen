@@ -29,7 +29,7 @@ FinalizationPipeline   ONE path for a clean stop AND for crash recovery:
                        probe every segment → repair truncated ones (originals kept
                        until the repair verifies) → reconcile durations against the
                        journal → hash into integrity.json → join by stream copy,
-                       one output per arrangement group → hand to delivery.
+                       one output per arrangement group → hand to transfer.
                        It never deletes a working file.
   ├── FfprobeClient      asks ffprobe the questions finalisation needs
   ├── CoverageCalculator pure gap arithmetic: the honest coverage statement
@@ -37,9 +37,9 @@ FinalizationPipeline   ONE path for a clean stop AND for crash recovery:
   ├── RecoveryScanner    at every host start: finds journals with no terminal event,
   │                      re-adopts and stops any encoder still writing to them, then
   │                      runs the pipeline above and reports what was recovered
-  └── SegmentClipper     extracts part of a finished recording by stream copy at
-                         segment boundaries — no re-encode, so it is instant and the
-                         picture is untouched
+  └── RecordingCatalog   reads the working folder and says what recordings are in it.
+                         A plain scan with no host and no IPC, so the UI, the CLI, and
+                         the host all answer "what recordings exist?" identically
 ```
 
 Start reading with `JournalEvent.cs` — the whole folder is built around that one

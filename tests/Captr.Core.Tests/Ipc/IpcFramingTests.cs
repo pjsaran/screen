@@ -10,7 +10,7 @@ public class IpcFramingTests
     public async Task An_envelope_round_trips_through_the_frame_format()
     {
         using var stream = new MemoryStream();
-        IpcEnvelope original = IpcProtocol.Envelope(IpcKinds.Start, new StartRequest(15, "sharp-text", null));
+        IpcEnvelope original = IpcProtocol.Envelope(IpcKinds.Start, new StartRequest(15, "high", "veryfast", null));
 
         await IpcProtocol.WriteAsync(stream, original, TestContext.Current.CancellationToken);
         stream.Position = 0;
@@ -20,7 +20,8 @@ public class IpcFramingTests
         read.Kind.ShouldBe(IpcKinds.Start);
         StartRequest payload = read.PayloadAs<StartRequest>().ShouldNotBeNull();
         payload.FrameRate.ShouldBe(15);
-        payload.QualityPreset.ShouldBe("sharp-text");
+        payload.Quality.ShouldBe("high");
+        payload.SpeedPreset.ShouldBe("veryfast");
     }
 
     [Fact]

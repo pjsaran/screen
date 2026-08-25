@@ -1,0 +1,239 @@
+<Page
+    x:Class="Captr.App.Views.TransfersPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:theme="clr-namespace:Captr.App.Theme"
+    xmlns:views="clr-namespace:Captr.App.Views"
+    Title="Transfers">
+    <!--
+        A real table: one line per transfer, fixed columns, a hairline between rows.
+        Twenty transfers should read as a list you can scan down, not as twenty
+        cards. Anything that is not always true — an explanation, the server's own
+        words, a progress bar — appears only on the rows that have it, so a page of
+        healthy transfers stays one line each.
+    -->
+    <Page.Resources>
+        <!-- The state chip is coloured by what the state MEANS, so a page of
+             transfers can be triaged without reading a word: green done, blue
+             running, amber waiting, red needs a human.
+
+             Each is a low-alpha TINT with the theme's matching foreground on top.
+             A solid fill with primary text on it is unreadable in light mode —
+             near-black on dark green — which is exactly what this replaced. -->
+        <Style x:Key="StateChip" TargetType="Border" BasedOn="{StaticResource Pill}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Severity}" Value="Done">
+                    <Setter Property="Background" Value="{StaticResource SuccessTintBrush}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource SuccessEdgeBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Severity}" Value="Active">
+                    <Setter Property="Background" Value="{StaticResource InfoTintBrush}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource InfoEdgeBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Severity}" Value="Waiting">
+                    <Setter Property="Background" Value="{StaticResource CautionTintBrush}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource CautionEdgeBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Severity}" Value="Failed">
+                    <Setter Property="Background" Value="{StaticResource CriticalTintBrush}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource CriticalEdgeBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="StateChipText" TargetType="TextBlock" BasedOn="{StaticResource PillText}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Severity}" Value="Done">
+                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Severity}" Value="Active">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Severity}" Value="Waiting">
+                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Severity}" Value="Failed">
+                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Page.Resources>
+
+    <Grid Margin="{StaticResource PagePadding}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <views:PageHeader Grid.Row="0" Title="Transfers">
+            <views:PageHeader.Actions>
+                <StackPanel Orientation="Horizontal">
+                    <ui:Button Style="{StaticResource ActionButton}" Content="Retry all failed"
+                               Command="{Binding RetryAllCommand}" IsEnabled="{Binding HasFailures}" />
+                    <ui:Button Style="{StaticResource ActionButton}" Content="Refresh" Margin="6,0,0,0"
+                               Command="{Binding RefreshCommand}" />
+                </StackPanel>
+            </views:PageHeader.Actions>
+        </views:PageHeader>
+
+        <!-- ==== Summary: the shape of the queue in four numbers ================ -->
+        <Border Grid.Row="1" Style="{StaticResource Card}" Padding="14,10"
+                Visibility="{Binding HasAny, Converter={StaticResource BoolToVisibility}}">
+            <UniformGrid Rows="1" Columns="4">
+                <StackPanel>
+                    <TextBlock theme:Typo.Text="Transferred" Style="{StaticResource MicroLabel}" />
+                    <TextBlock Text="{Binding CompletedCount}" Style="{StaticResource DisplayText}" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock theme:Typo.Text="Sending" Style="{StaticResource MicroLabel}" />
+                    <TextBlock Text="{Binding InProgressCount}" Style="{StaticResource DisplayText}" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock theme:Typo.Text="Waiting" Style="{StaticResource MicroLabel}" />
+                    <TextBlock Text="{Binding WaitingCount}" Style="{StaticResource DisplayText}" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock theme:Typo.Text="Needs attention" Style="{StaticResource MicroLabel}" />
+                    <TextBlock Text="{Binding FailedCount}" Style="{StaticResource DisplayText}" />
+                </StackPanel>
+            </UniformGrid>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Border Style="{StaticResource TableCard}" VerticalAlignment="Top"
+                    Visibility="{Binding HasAny, Converter={StaticResource BoolToVisibility}}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- ==== Column headers ====================================
+                         The widths here and in the rows below are the SAME
+                         literals on purpose: a Grid per row cannot share widths
+                         with a header outside it, so they are kept in step by
+                         being written once each and checked together. -->
+                    <Border Grid.Row="0" Style="{StaticResource TableHeader}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" MinWidth="140" />
+                                <ColumnDefinition Width="120" />
+                                <ColumnDefinition Width="74" />
+                                <ColumnDefinition Width="94" />
+                                <ColumnDefinition Width="118" />
+                                <ColumnDefinition Width="72" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" theme:Typo.Text="File" Style="{StaticResource MicroLabel}" />
+                            <TextBlock Grid.Column="1" theme:Typo.Text="Destination" Style="{StaticResource MicroLabel}" />
+                            <TextBlock Grid.Column="2" theme:Typo.Text="Size" Style="{StaticResource MicroLabel}" />
+                            <TextBlock Grid.Column="3" theme:Typo.Text="Queued" Style="{StaticResource MicroLabel}" />
+                            <TextBlock Grid.Column="4" theme:Typo.Text="State" Style="{StaticResource MicroLabel}" />
+                            <TextBlock Grid.Column="5" theme:Typo.Text="Action" Style="{StaticResource MicroLabel}"
+                                       HorizontalAlignment="Right" />
+                        </Grid>
+                    </Border>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding Transfers}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource TableRow}">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" MinWidth="140" />
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="74" />
+                                            <ColumnDefinition Width="94" />
+                                            <ColumnDefinition Width="118" />
+                                            <ColumnDefinition Width="72" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Grid.Column="0" Text="{Binding File}"
+                                                   Style="{StaticResource BodyText}" TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                                   Margin="0,0,10,0" ToolTip="{Binding File}" />
+
+                                        <TextBlock Grid.Column="1" Text="{Binding Destination}"
+                                                   Style="{StaticResource CaptionText}" TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                                   Margin="0,0,10,0" />
+
+                                        <TextBlock Grid.Column="2" Text="{Binding Size}"
+                                                   Style="{StaticResource FigureText}" VerticalAlignment="Center" />
+
+                                        <TextBlock Grid.Column="3" Text="{Binding Started}"
+                                                   Style="{StaticResource CaptionText}" TextWrapping="NoWrap"
+                                                   VerticalAlignment="Center" />
+
+                                        <StackPanel Grid.Column="4" VerticalAlignment="Center" Margin="0,0,8,0">
+                                            <Border Style="{StaticResource StateChip}" MinWidth="0">
+                                                <TextBlock theme:Typo.Text="{Binding StateLabel}"
+                                                           Style="{StaticResource StateChipText}" />
+                                            </Border>
+                                            <TextBlock Text="{Binding AttemptsText}"
+                                                       Style="{StaticResource CaptionText}" Margin="1,2,0,0"
+                                                       Visibility="{Binding AttemptsText,
+                                                                    Converter={StaticResource NonEmptyToVisibility}}" />
+                                        </StackPanel>
+
+                                        <!-- Retry and Stop are mutually exclusive by
+                                             construction (see TransferRow), so they
+                                             can share one cell. -->
+                                        <StackPanel Grid.Column="5" Orientation="Horizontal"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <ui:Button Style="{StaticResource RowActionButton}" Content="Retry"
+                                                       Command="{Binding DataContext.RetryCommand,
+                                                                 RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                       CommandParameter="{Binding}"
+                                                       Visibility="{Binding CanRetry,
+                                                                    Converter={StaticResource BoolToVisibility}}" />
+                                            <ui:Button Style="{StaticResource RowActionButton}" Content="Stop"
+                                                       ToolTip="Stop trying. The transfer stays in this list and can be retried; nothing local is deleted."
+                                                       Command="{Binding DataContext.StopCommand,
+                                                                 RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                       CommandParameter="{Binding}"
+                                                       Visibility="{Binding CanStop,
+                                                                    Converter={StaticResource BoolToVisibility}}" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <ProgressBar Style="{StaticResource TransferProgress}" Margin="0,6,0,0"
+                                                 Value="{Binding Progress, Mode=OneWay}"
+                                                 Visibility="{Binding ShowProgress,
+                                                              Converter={StaticResource BoolToVisibility}}" />
+
+                                    <!-- Plain English first, then the server's own words
+                                         verbatim (SPEC §9) — one tells you what to do, the
+                                         other is what you quote to an administrator. -->
+                                    <TextBlock Text="{Binding Explanation}" Style="{StaticResource CaptionText}"
+                                               Margin="0,6,0,0"
+                                               Visibility="{Binding Explanation,
+                                                            Converter={StaticResource NonEmptyToVisibility}}" />
+                                    <Border Margin="0,6,0,0" Padding="8,6" CornerRadius="4"
+                                            Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                            Visibility="{Binding ServerError,
+                                                         Converter={StaticResource NonEmptyToVisibility}}">
+                                        <TextBlock Text="{Binding ServerError}" Style="{StaticResource MonoText}"
+                                                   TextWrapping="Wrap" TextTrimming="None" />
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <!-- Declared AFTER the table so it draws on top of it: with nothing to
+                 show, the table is hidden and this is the only thing on screen. -->
+            <TextBlock Text="{Binding Message}" Style="{StaticResource CaptionText}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
+                       MaxWidth="420"
+                       Visibility="{Binding Message, Converter={StaticResource NonEmptyToVisibility}}" />
+        </Grid>
+    </Grid>
+</Page>

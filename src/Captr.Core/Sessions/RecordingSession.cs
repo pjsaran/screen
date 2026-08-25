@@ -50,7 +50,8 @@ public sealed class RecordingSession
         _journal = journal;
         _diskGuard = diskGuard;
         _plan = context.InitialPlan;
-        CurrentQualityPreset = context.QualityPresetName;
+        CurrentQuality = context.QualityName;
+        CurrentSpeedPreset = context.SpeedPresetName;
         CurrentExcludedDisplayIds = context.ExcludedDisplayIds;
         _log = log.ForContext<RecordingSession>();
         _supervisor = new EncoderSupervisor(context.FfmpegPath, journal, log);
@@ -76,7 +77,10 @@ public sealed class RecordingSession
     public int CurrentFrameRate => _plan.FrameRate;
 
     /// <inheritdoc cref="CurrentFrameRate"/>
-    public string CurrentQualityPreset { get; private set; }
+    public string CurrentQuality { get; private set; }
+
+    /// <inheritdoc cref="CurrentFrameRate"/>
+    public string CurrentSpeedPreset { get; private set; }
 
     /// <inheritdoc cref="CurrentFrameRate"/>
     public IReadOnlyList<string> CurrentExcludedDisplayIds { get; private set; }
@@ -84,6 +88,13 @@ public sealed class RecordingSession
     /// <summary>Everything a session needs at birth; produced by
     /// <see cref="SessionPlanner"/> which validates settings, resolves displays,
     /// selects the encoder, and preflights the disk BEFORE any state is created.</summary>
+    /// <param name="CacheToInvalidateOnEarlyFailure">
+    /// Set only when the encoder came from the cache instead of a fresh trial. If the
+    /// recording then fails within its first seconds, the cached winner is the prime
+    /// suspect (a driver can break without changing its version), so the cache is
+    /// cleared and the next start re-probes properly. Null when the encoder was
+    /// trialled during this start — there is nothing stale to blame.
+    /// </param>
     public sealed record SessionContext(
         Guid SessionId,
         string WorkingFolder,
@@ -93,7 +104,9 @@ public sealed class RecordingSession
         IReadOnlyList<string>? SoftwareFallbackArguments,
         long MeasuredBytesPerHour,
         IReadOnlyList<string> ExcludedDisplayIds,
-        string QualityPresetName);
+        string QualityName,
+        string SpeedPresetName,
+        EncoderCache? CacheToInvalidateOnEarlyFailure = null);
 
     /// <summary>Creates the session: journal, ballast, initial state. The caller
     /// (host) then invokes <see cref="RunAsync"/> exactly once.</summary>
@@ -180,6 +193,7 @@ public sealed class RecordingSession
         Task heartbeatTask = HeartbeatLoopAsync(trackerCts.Token);
 
         string? failure = null;
+        DateTimeOffset recordingStartedUtc = DateTimeOffset.UtcNow;
         try
         {
             _state = SessionState.Recording;
@@ -199,6 +213,7 @@ public sealed class RecordingSession
                 if (outcome.Kind == SupervisionEndKind.FailedLoudly)
                 {
                     failure = outcome.FailureReason;
+                    ForgetCachedEncoderIfItFailedImmediately(recordingStartedUtc);
                     break;
                 }
 
@@ -431,7 +446,8 @@ public sealed class RecordingSession
         _arrangementGroup++;
         _plan = _plan with
         {
-            Sources = [.. stillWanted.Select(d => new CaptureSource(d.DxgiOutputIndex, d.Width, d.Height))],
+            Sources = [.. stillWanted.Select(d =>
+                new CaptureSource(d.DxgiOutputIndex, d.Width, d.Height, d.VirtualX, d.VirtualY))],
         };
         _journal.Append(new TopologyChanged
         {
@@ -449,6 +465,40 @@ public sealed class RecordingSession
             NewArrangementGroup = _arrangementGroup,
         });
         _log.Information("Display topology changed; continuing under arrangement group {Group}", _arrangementGroup);
+    }
+
+    /// <summary>
+    /// How soon a failure counts as "the encoder never worked" rather than "something
+    /// went wrong later". A cached encoder that fails inside this window is assumed to
+    /// be the cause, so the cache is cleared and the next start re-probes from scratch.
+    /// </summary>
+    private static readonly TimeSpan EarlyFailureWindow = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Clears the encoder cache when a session that trusted it died almost at once.
+    /// This is the safety net that lets a cache hit skip the confirmation trial and
+    /// start recording immediately (see <see cref="Encoders.EncoderSelector"/>): the
+    /// recording itself becomes the trial, and a bad cache costs one failed start
+    /// rather than a wrong encoder for hours.
+    /// </summary>
+    private void ForgetCachedEncoderIfItFailedImmediately(DateTimeOffset recordingStartedUtc)
+    {
+        if (_context.CacheToInvalidateOnEarlyFailure is not { } cache)
+        {
+            return; // The encoder was trialled during this start; the cache is not to blame.
+        }
+
+        TimeSpan ranFor = DateTimeOffset.UtcNow - recordingStartedUtc;
+        if (ranFor > EarlyFailureWindow)
+        {
+            return;
+        }
+
+        _log.Warning(
+            "The recording failed after only {Seconds:F0}s using the cached encoder {Encoder}; " +
+            "clearing the encoder cache so the next start re-probes every candidate",
+            ranFor.TotalSeconds, _plan.Encoder.CodecName);
+        cache.Invalidate();
     }
 
     /// <summary>
@@ -473,22 +523,24 @@ public sealed class RecordingSession
         IReadOnlyList<DisplayInfo> attached = new DisplayEnumerator().Enumerate();
         ResolvedSelection selection = DisplaySelection.Resolve(attached, degraded.ExcludedDisplayIds, []);
         IReadOnlyList<CaptureSource> sources = selection.Included.Count > 0
-            ? [.. selection.Included.Select(d => new CaptureSource(d.DxgiOutputIndex, d.Width, d.Height))]
+            ? [.. selection.Included.Select(d =>
+                new CaptureSource(d.DxgiOutputIndex, d.Width, d.Height, d.VirtualX, d.VirtualY))]
             : _plan.Sources; // Never leave a session with nothing to capture.
 
-        // Quality: rebuild the encoder's arguments for the SAME encoder at the new
-        // preset — the proven encoder stays proven.
+        // Quality and speed: rebuild the encoder's arguments for the SAME encoder at
+        // the new settings — the proven encoder stays proven.
         ArrangementPlan arrangement = ArrangementPlanner.Plan(sources);
-        QualityPreset preset = QualityPresets.Find(degraded.QualityPreset)
-            ?? QualityPresets.Find(QualityPresets.DefaultName)!;
+        QualityLevel quality = QualityLevels.FindOrDefault(degraded.Quality);
+        SpeedPreset speed = SpeedPresets.FindOrDefault(degraded.SpeedPreset);
         var encoder = new EncoderSettings(
             _plan.Encoder.CodecName,
-            QualityPresets.BuildQualityArguments(
-                _plan.Encoder.CodecName, preset, degraded.QualityOverride,
+            QualityLevels.BuildEncoderArguments(
+                _plan.Encoder.CodecName, speed, quality,
                 arrangement.CanvasWidth, arrangement.CanvasHeight, degraded.FrameRate));
 
         _plan = _plan with { FrameRate = degraded.FrameRate, Sources = sources, Encoder = encoder };
-        CurrentQualityPreset = preset.Name;
+        CurrentQuality = quality.Name;
+        CurrentSpeedPreset = speed.Name;
         CurrentExcludedDisplayIds = degraded.ExcludedDisplayIds;
 
         if (degraded.FrameRate != oldFps)
@@ -503,10 +555,10 @@ public sealed class RecordingSession
         }
 
         Note($"Settings degraded while recording: {sources.Count} display(s), {degraded.FrameRate} fps, " +
-             $"quality '{preset.Name}'. Continuing under arrangement group {_arrangementGroup}.");
+             $"quality '{quality.Name}', preset '{speed.Name}'. Continuing under arrangement group {_arrangementGroup}.");
         _log.Information(
-            "Applied a degrading settings change: {Displays} display(s), {Fps} fps, quality {Preset}; group {Group}",
-            sources.Count, degraded.FrameRate, preset.Name, _arrangementGroup);
+            "Applied a degrading settings change: {Displays} display(s), {Fps} fps, quality {Quality}, preset {Preset}; group {Group}",
+            sources.Count, degraded.FrameRate, quality.Name, speed.Name, _arrangementGroup);
     }
 
     private void ReduceFrameRate()

@@ -33,9 +33,6 @@ public sealed record HeartbeatSnapshot
     public required string State { get; init; }
     public required int HostProcessId { get; init; }
 
-    /// <summary>The segment file currently being written, if any.</summary>
-    public string? CurrentSegment { get; init; }
-
     /// <summary>Encoder output position within the current segment.</summary>
     public TimeSpan? EncodedTime { get; init; }
 

@@ -128,6 +128,89 @@ public static class CredentialVault
             return PInvoke.CredDelete(targetPtr, CRED_TYPE.CRED_TYPE_GENERIC, 0);
         }
     }
+
+    /// <summary>
+    /// The NAMES of every credential Captr has stored, without touching any secret
+    /// material. Used by diagnostics to report entries no destination points at any
+    /// more — the residue of a Captr that did not clean up after itself.
+    /// </summary>
+    /// <remarks>
+    /// The names returned are Captr's own, with the <see cref="TargetPrefix"/>
+    /// stripped, so they can be compared directly with
+    /// <c>DestinationSettings.CredentialName</c>.
+    /// </remarks>
+    public static unsafe IReadOnlyList<string> ListNames()
+    {
+        var names = new List<string>();
+
+        uint count = 0;
+        CREDENTIALW** entries = null;
+
+        // The filter is a wildcard over the target name, so this only ever sees
+        // Captr's own entries — never the rest of the user's vault.
+        fixed (char* filter = TargetPrefix + "*")
+        {
+            if (!PInvoke.CredEnumerate(filter, 0, &count, &entries))
+            {
+                return names;
+            }
+        }
+
+        try
+        {
+            for (uint i = 0; i < count; i++)
+            {
+                string target = new(entries[i]->TargetName);
+                if (target.StartsWith(TargetPrefix, StringComparison.Ordinal))
+                {
+                    names.Add(target[TargetPrefix.Length..]);
+                }
+            }
+        }
+        finally
+        {
+            PInvoke.CredFree(entries);
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Moves a stored secret to a new name, deleting the old entry. Returns false
+    /// when nothing was stored under <paramref name="fromName"/>, in which case
+    /// neither entry is touched.
+    /// </summary>
+    /// <remarks>
+    /// This lives in the vault rather than in the caller ON PURPOSE. Renaming means
+    /// briefly holding a second copy of the secret, and this module is the only place
+    /// allowed to do that — the copy is handed straight to <see cref="Store"/>, which
+    /// takes ownership and zeroes it. A caller doing the same thing with
+    /// <see cref="Use"/> would be copying secret material out of the borrowed buffer,
+    /// which the vault's contract forbids.
+    /// </remarks>
+    public static bool Rename(string fromName, string toName)
+    {
+        if (string.Equals(fromName, toName, StringComparison.Ordinal))
+        {
+            return Exists(fromName);
+        }
+
+        try
+        {
+            Use(fromName, secret =>
+            {
+                Store(toName, [.. secret]);
+                return true;
+            });
+        }
+        catch (CredentialNotFoundException)
+        {
+            return false;
+        }
+
+        Delete(fromName);
+        return true;
+    }
 }
 
 /// <summary>The named credential is not provisioned — the message tells the user

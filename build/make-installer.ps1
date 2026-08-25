@@ -36,6 +36,55 @@ if (-not (Test-Path (Join-Path $publishDir 'Captr.App.exe'))) {
     throw "No published payload at $publishDir. Run: pwsh build/build.ps1 -Publish"
 }
 
+# The payload must be the version we are about to stamp on the installer.
+#
+# This script packages whatever is already in publish/; it does not build. So
+# changing Version.props and running only this produced an installer that ANNOUNCED
+# the new version, registered it in Programs and Features, and contained binaries
+# reporting the old one. Everything downstream then disagreed: the installer's
+# upgrade check, `captr version`, and the About page. Caught here rather than
+# discovered by a user.
+[xml]$versionPropsCheck = Get-Content (Join-Path $RepoRoot 'Version.props')
+$expectedVersion = $versionPropsCheck.Project.PropertyGroup.CaptrVersion.Trim()
+$publishedVersion = (Get-Item (Join-Path $publishDir 'Captr.App.exe')).VersionInfo.ProductVersion
+
+# The published version carries "+<commit>"; compare only the version part.
+if ($publishedVersion) { $publishedVersion = ($publishedVersion -split '\+')[0] }
+
+if ($publishedVersion -ne $expectedVersion) {
+    throw ("The published payload is version '$publishedVersion' but Version.props says " +
+           "'$expectedVersion'. Re-publish before packaging: pwsh build/build.ps1 -Publish")
+}
+
+# ...and it must be a payload built from the CODE THAT IS HERE NOW.
+#
+# The version check above is not enough on its own, and that is not a hypothetical:
+# during development the version stays at 0.1.0 for weeks, so a publish/ folder from
+# yesterday matches Version.props perfectly and packages happily. The result is an
+# installer that installs, runs, and shows none of the day's work - with nothing
+# anywhere saying why.
+#
+# So compare the payload against the source it was supposedly built from. Anything
+# under src/ that is newer than the published binaries means the payload is stale.
+$publishedStamp = (Get-Item (Join-Path $publishDir 'Captr.App.dll')).LastWriteTimeUtc
+
+$newerSource = Get-ChildItem (Join-Path $RepoRoot 'src') -Recurse -File `
+    -Include *.cs, *.xaml, *.csproj, *.props, *.resx, *.ico |
+    Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' -and $_.LastWriteTimeUtc -gt $publishedStamp } |
+    Sort-Object LastWriteTimeUtc -Descending |
+    Select-Object -First 3
+
+if ($newerSource) {
+    $names = ($newerSource | ForEach-Object { '  ' + $_.FullName.Substring($RepoRoot.Length + 1) }) -join "`n"
+    throw ("The published payload in $publishDir was built at " +
+           "$($publishedStamp.ToLocalTime().ToString('yyyy-MM-dd HH:mm')) and these source files " +
+           "have changed since:`n$names`n`n" +
+           "Packaging it would produce an installer without those changes. Re-publish first:`n" +
+           "  pwsh build/build.ps1 -Publish`n" +
+           "or do the whole thing in one step:`n" +
+           "  pwsh build/build.ps1 -Installer")
+}
+
 # --- 2. Inno Setup ---------------------------------------------------------------
 if (-not (Test-Path $iscc)) {
     $installer = Join-Path $env:TEMP "innosetup-$innoVersion.exe"

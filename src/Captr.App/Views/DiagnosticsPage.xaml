@@ -3,20 +3,194 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:theme="clr-namespace:Captr.App.Theme"
+    xmlns:views="clr-namespace:Captr.App.Views"
     Title="Diagnostics">
-    <StackPanel Margin="24" MaxWidth="640" HorizontalAlignment="Left">
-        <TextBlock Text="Diagnostics" FontSize="24" FontWeight="SemiBold" />
+    <Page.Resources>
+        <!-- Each check's chip is coloured by its level, so the page can be triaged
+             from the doorway: green fine, amber worth knowing, red will not work.
+             Tint background + theme foreground, for the same reason as everywhere
+             else — a solid fill with primary text on it is unreadable in one theme
+             or the other. -->
+        <Style x:Key="LevelChip" TargetType="Border" BasedOn="{StaticResource Pill}">
+            <Setter Property="MinWidth" Value="84" />
+            <Setter Property="Background" Value="{StaticResource SuccessTintBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource SuccessEdgeBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Level}" Value="Attention">
+                    <Setter Property="Background" Value="{StaticResource CautionTintBrush}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource CautionEdgeBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="Problem">
+                    <Setter Property="Background" Value="{StaticResource CriticalTintBrush}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource CriticalEdgeBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
 
-        <TextBlock Text="About this installation" FontWeight="SemiBold" Margin="0,16,0,4" />
-        <Border Padding="12" CornerRadius="8" Background="{DynamicResource ControlFillColorDefaultBrush}">
-            <TextBlock Text="{Binding BuildIdentity}" FontFamily="Consolas" FontSize="12" />
-        </Border>
-        <TextBlock Margin="0,12,0,0" TextWrapping="Wrap"
-                   Text="The support bundle contains the session journals, application logs, integrity records, encoder log tails, and system information. It contains no video content and no secrets." />
-        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-            <ui:Button Content="Export support bundle" Appearance="Primary" Command="{Binding ExportBundleCommand}" />
-            <ui:Button Content="Open log folder" Margin="8,0,0,0" Command="{Binding OpenLogsCommand}" />
-        </StackPanel>
-        <TextBlock Text="{Binding Message}" Margin="0,12,0,0" TextWrapping="Wrap" />
-    </StackPanel>
+        <Style x:Key="LevelChipText" TargetType="TextBlock" BasedOn="{StaticResource PillText}">
+            <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Level}" Value="Attention">
+                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Level}" Value="Problem">
+                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Page.Resources>
+
+    <Grid Margin="{StaticResource PagePadding}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <views:PageHeader Grid.Row="0" Title="Diagnostics">
+            <views:PageHeader.Actions>
+                <ui:Button Style="{StaticResource ActionButton}" Content="Re-run checks"
+                           Command="{Binding RefreshCommand}" />
+            </views:PageHeader.Actions>
+        </views:PageHeader>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- ==== Health checks: the reason this page exists ============== -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Health" Style="{StaticResource MicroLabel}" Margin="0,0,0,2" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Each line is checked right now. Anything amber or red says what to do about it." />
+                        <ItemsControl ItemsSource="{Binding Checks}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource TableRow}" Padding="0,8">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="140" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <!-- The check's name in the same uppercase micro-voice as
+                                                 every other label, so the page reads label → verdict →
+                                                 finding. Top-aligned against the chip's own height. -->
+                                            <TextBlock Grid.Column="0" theme:Typo.Text="{Binding Name}"
+                                                       Style="{StaticResource MicroLabel}"
+                                                       VerticalAlignment="Top" Margin="0,6,10,0" />
+
+                                            <Border Grid.Column="1" Style="{StaticResource LevelChip}"
+                                                    VerticalAlignment="Top" Margin="0,0,12,0">
+                                                <TextBlock theme:Typo.Text="{Binding Level}"
+                                                           Style="{StaticResource LevelChipText}" />
+                                            </Border>
+
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Text="{Binding Finding}" Style="{StaticResource BodyText}" />
+                                                <TextBlock Text="{Binding WhatToDo}" Style="{StaticResource CaptionText}"
+                                                           Margin="0,3,0,0"
+                                                           Visibility="{Binding WhatToDo,
+                                                                        Converter={StaticResource NonEmptyToVisibility}}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== Recent warnings ========================================= -->
+                <Border Style="{StaticResource Card}"
+                        Visibility="{Binding HasRecentIssues, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Recent warnings" Style="{StaticResource MicroLabel}"
+                                   Margin="0,0,0,2" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Warnings and errors from the most recent log, newest last. Routine activity is left out; the support bundle has the complete files." />
+                        <Border Padding="10,8" CornerRadius="6" MaxHeight="220"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                                <TextBlock Text="{Binding RecentIssues}" Style="{StaticResource MonoText}"
+                                           TextTrimming="None" TextWrapping="NoWrap" />
+                            </ScrollViewer>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== Where things live ======================================= -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Where Captr keeps things" Style="{StaticResource MicroLabel}"
+                                   Margin="0,0,0,2" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Nothing is hidden. Open any of these to look for yourself." />
+                        <ItemsControl ItemsSource="{Binding Locations}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource TableRow}" Padding="0,8">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="140" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Grid.Column="0" theme:Typo.Text="{Binding Name}"
+                                                       Style="{StaticResource MicroLabel}"
+                                                       VerticalAlignment="Center" Margin="0,0,10,0" />
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
+                                                <TextBlock Text="{Binding Path}" Style="{StaticResource MonoText}"
+                                                           ToolTip="{Binding Path}" />
+                                                <TextBlock Text="{Binding Explanation}"
+                                                           Style="{StaticResource CaptionText}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <ui:Button Style="{StaticResource RowActionButton}" Grid.Column="2" Content="Open"
+                                                       VerticalAlignment="Center"
+                                                       Command="{Binding DataContext.OpenLocationCommand,
+                                                                 RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                       CommandParameter="{Binding}" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== Build identity ========================================== -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="This installation" Style="{StaticResource MicroLabel}"
+                                   Margin="0,0,0,2" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Quote this exactly when reporting a problem — it identifies the build down to the commit and the bundled FFmpeg." />
+                        <Border Padding="10,8" CornerRadius="6"
+                                Background="{DynamicResource ControlFillColorDefaultBrush}">
+                            <TextBlock Text="{Binding BuildIdentity}" Style="{StaticResource MonoText}"
+                                       TextTrimming="None" TextWrapping="Wrap" />
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== Support bundle ========================================== -->
+                <Border Style="{StaticResource Card}" Margin="0">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Support bundle" Style="{StaticResource MicroLabel}"
+                                   Margin="0,0,0,2" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="A single zip on your Desktop containing the session journals, application logs, integrity records, encoder log tails, and system information. It contains no video content and no secrets — that is enforced, and proven by a test that plants a secret and searches the bundle for it." />
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button Style="{StaticResource ActionButton}" Content="Export support bundle" Appearance="Primary"
+                                       Command="{Binding ExportBundleCommand}" />
+                            <ui:Button Style="{StaticResource ActionButton}" Content="Open log folder" Margin="6,0,0,0" Command="{Binding OpenLogsCommand}" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding Message}" Style="{StaticResource BodyText}" Margin="0,10,0,0"
+                                   Visibility="{Binding Message, Converter={StaticResource NonEmptyToVisibility}}" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
 </Page>

@@ -4,14 +4,51 @@ using System.Text;
 namespace Captr.Core.Encoders;
 
 /// <summary>
-/// Produces the <c>-filter_complex</c> graph string: one <c>ddagrab</c> capture per
-/// display, downloaded to system memory, padded onto its cell, stacked into the
-/// canvas, optionally overlaid with text, and converted to the encoder pixel format.
-/// Owns the graph's exact text — which is why it is pure and pinned by golden files.
-/// If it is wrong, capture produces the wrong picture or fails to start at all.
+/// Produces the <c>-filter_complex</c> graph string: one capture chain per display,
+/// padded onto its cell, stacked into the canvas, optionally overlaid with text, and
+/// converted to the encoder pixel format. With Desktop Duplication the chain STARTS
+/// with a <c>ddagrab</c> source filter; with GDI capture the frames arrive as real
+/// FFmpeg inputs (see <see cref="BuildInputArguments"/>) and the chain starts from
+/// an input label instead. Owns the graph's exact text — which is why it is pure and
+/// pinned by golden files. If it is wrong, capture produces the wrong picture or
+/// fails to start at all.
 /// </summary>
 public static class FilterGraphBuilder
 {
+    /// <summary>
+    /// The <c>-i</c> input arguments that must precede the filter graph. Empty for
+    /// Desktop Duplication (ddagrab is a filter, not an input); one <c>gdigrab</c>
+    /// input per display for GDI capture, each grabbing its display's rectangle of
+    /// the virtual desktop by position and size.
+    /// </summary>
+    public static IReadOnlyList<string> BuildInputArguments(RecordingPlan plan)
+    {
+        if (plan.CaptureMethod != CaptureMethod.Gdi)
+        {
+            return [];
+        }
+
+        var arguments = new List<string>();
+        foreach (CaptureSource source in plan.Sources)
+        {
+            arguments.AddRange(
+            [
+                "-f", "gdigrab",
+                "-framerate", plan.FrameRate.ToString(CultureInfo.InvariantCulture),
+                "-draw_mouse", EncodingConstants.DrawMouse ? "1" : "0",
+                // The virtual-desktop position, which can be negative for a display
+                // left of or above the primary one. gdigrab addresses the desktop by
+                // coordinates; it has no notion of an output index.
+                "-offset_x", source.VirtualX.ToString(CultureInfo.InvariantCulture),
+                "-offset_y", source.VirtualY.ToString(CultureInfo.InvariantCulture),
+                "-video_size", FormattableString.Invariant($"{source.Width}x{source.Height}"),
+                "-i", "desktop",
+            ]);
+        }
+
+        return arguments;
+    }
+
     /// <summary>Builds the complete filter graph for a plan.</summary>
     public static string Build(RecordingPlan plan, ArrangementPlan arrangement)
     {
@@ -28,15 +65,25 @@ public static class FilterGraphBuilder
                 graph.Append(';');
             }
 
-            graph.Append(CultureInfo.InvariantCulture,
-                $"ddagrab=output_idx={source.OutputIndex}:framerate={plan.FrameRate}:draw_mouse={(EncodingConstants.DrawMouse ? 1 : 0)}");
-            // hwdownload: D3D11 frames -> system memory; format=bgra is mandatory
-            // immediately after (the download must be told its layout, and every
-            // CPU filter downstream needs a defined format).
-            graph.Append(",hwdownload,format=bgra");
+            if (plan.CaptureMethod == CaptureMethod.Gdi)
+            {
+                // The frames come from the i-th gdigrab input, already in system
+                // memory — nothing to download, nothing to configure here.
+                graph.Append(CultureInfo.InvariantCulture, $"[{i}:v]");
+            }
+            else
+            {
+                graph.Append(CultureInfo.InvariantCulture,
+                    $"ddagrab=output_idx={source.OutputIndex}:framerate={plan.FrameRate}:draw_mouse={(EncodingConstants.DrawMouse ? 1 : 0)}");
+                // hwdownload: D3D11 frames -> system memory; format=bgra is mandatory
+                // immediately after (the download must be told its layout, and every
+                // CPU filter downstream needs a defined format).
+                graph.Append(",hwdownload,format=bgra,");
+            }
+
             // Pad onto the cell with the display centred; bars are black.
             graph.Append(CultureInfo.InvariantCulture,
-                $",pad=w={cell.Width}:h={cell.Height}:x=(ow-iw)/2:y=(oh-ih)/2:color=black");
+                $"pad=w={cell.Width}:h={cell.Height}:x=(ow-iw)/2:y=(oh-ih)/2:color=black");
             graph.Append(CultureInfo.InvariantCulture, $"[s{i}]");
         }
 

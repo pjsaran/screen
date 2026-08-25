@@ -77,8 +77,7 @@ public sealed class DisplayEnumerator : IDisplayEnumerator
         int outputIndexOnAdapter,
         int flatOutputIndex)
     {
-        int width = description.DesktopCoordinates.Right - description.DesktopCoordinates.Left;
-        int height = description.DesktopCoordinates.Bottom - description.DesktopCoordinates.Top;
+        (int width, int height) = PhysicalSize(description);
 
         return new DisplayInfo
         {
@@ -95,6 +94,45 @@ public sealed class DisplayEnumerator : IDisplayEnumerator
             DpiScale = QueryDpiScale(description.Monitor),
             RefreshRateHz = config.RefreshRateHz,
         };
+    }
+
+    /// <summary>
+    /// The display's size in REAL pixels — the number ddagrab will hand the filter
+    /// graph.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// DXGI's <c>DesktopCoordinates</c> are virtual-desktop coordinates, and Windows
+    /// SCALES those for a process that is not per-monitor DPI aware. On a 1920x1080
+    /// screen at 125% scaling, a DPI-aware process reads 1920x1080 and an unaware one
+    /// reads 1536x864 — for the same monitor. Desktop Duplication, meanwhile, always
+    /// captures the real 1920x1080.
+    /// </para>
+    /// <para>
+    /// Planning from the scaled number therefore builds a canvas SMALLER than the
+    /// frames, and ffmpeg refuses the graph outright with "Padded dimensions cannot be
+    /// smaller than input dimensions" — every encoder candidate then fails its trial
+    /// with a bare "Invalid argument". <c>EnumDisplaySettings</c> reports the mode the
+    /// hardware is actually in and is not virtualised, so it gives the same answer in
+    /// every process, DPI aware or not.
+    /// </para>
+    /// <para>
+    /// The DXGI rectangle is kept as the fallback: if the mode query fails, a scaled
+    /// size is still better than no display at all.
+    /// </para>
+    /// </remarks>
+    private static (int Width, int Height) PhysicalSize(OutputDescription description)
+    {
+        var mode = new DEVMODEW { dmSize = (ushort)System.Runtime.InteropServices.Marshal.SizeOf<DEVMODEW>() };
+        if (PInvoke.EnumDisplaySettings(description.DeviceName, ENUM_DISPLAY_SETTINGS_MODE.ENUM_CURRENT_SETTINGS, ref mode)
+            && mode.dmPelsWidth > 0 && mode.dmPelsHeight > 0)
+        {
+            return ((int)mode.dmPelsWidth, (int)mode.dmPelsHeight);
+        }
+
+        return (
+            description.DesktopCoordinates.Right - description.DesktopCoordinates.Left,
+            description.DesktopCoordinates.Bottom - description.DesktopCoordinates.Top);
     }
 
     /// <summary>What the Windows display-configuration API knows about one GDI

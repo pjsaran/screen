@@ -130,7 +130,7 @@ public sealed class IpcServer : IAsyncDisposable
             return envelope.Kind switch
             {
                 IpcKinds.Start => IpcProtocol.Envelope(IpcKinds.Start,
-                    await _operations.StartAsync(envelope.PayloadAs<StartRequest>() ?? new StartRequest(null, null, null), cancellationToken).ConfigureAwait(false)),
+                    await _operations.StartAsync(envelope.PayloadAs<StartRequest>() ?? new StartRequest(null, null, null, null), cancellationToken).ConfigureAwait(false)),
                 IpcKinds.Stop => IpcProtocol.Envelope(IpcKinds.Stop,
                     await _operations.StopAsync(cancellationToken).ConfigureAwait(false)),
                 IpcKinds.Pause => IpcProtocol.Envelope(IpcKinds.Pause,
@@ -145,14 +145,14 @@ public sealed class IpcServer : IAsyncDisposable
                     await _operations.VerifyAsync(envelope.PayloadAs<VerifyRequest>() ?? new VerifyRequest(""), cancellationToken).ConfigureAwait(false)),
                 IpcKinds.Recover => IpcProtocol.Envelope(IpcKinds.Recover,
                     await _operations.RecoverAsync(cancellationToken).ConfigureAwait(false)),
-                IpcKinds.ListDeliveries => IpcProtocol.Envelope(IpcKinds.ListDeliveries,
-                    await _operations.ListDeliveriesAsync(cancellationToken).ConfigureAwait(false)),
-                IpcKinds.RetryDelivery => IpcProtocol.Envelope(IpcKinds.RetryDelivery,
-                    await _operations.RetryDeliveryAsync(envelope.PayloadAs<RetryDeliveryRequest>() ?? new RetryDeliveryRequest(0), cancellationToken).ConfigureAwait(false)),
+                IpcKinds.ListTransfers => IpcProtocol.Envelope(IpcKinds.ListTransfers,
+                    await _operations.ListTransfersAsync(cancellationToken).ConfigureAwait(false)),
+                IpcKinds.RetryTransfer => IpcProtocol.Envelope(IpcKinds.RetryTransfer,
+                    await _operations.RetryTransferAsync(envelope.PayloadAs<RetryTransferRequest>() ?? new RetryTransferRequest(0), cancellationToken).ConfigureAwait(false)),
+                IpcKinds.CancelTransfer => IpcProtocol.Envelope(IpcKinds.CancelTransfer,
+                    await _operations.CancelTransferAsync(envelope.PayloadAs<CancelTransferRequest>() ?? new CancelTransferRequest(0), cancellationToken).ConfigureAwait(false)),
                 IpcKinds.Resend => IpcProtocol.Envelope(IpcKinds.Resend,
                     await _operations.ResendAsync(envelope.PayloadAs<ResendRequest>() ?? new ResendRequest(""), cancellationToken).ConfigureAwait(false)),
-                IpcKinds.Clip => IpcProtocol.Envelope(IpcKinds.Clip,
-                    await _operations.ClipAsync(envelope.PayloadAs<ClipRequest>() ?? new ClipRequest("", 1, 1), cancellationToken).ConfigureAwait(false)),
                 IpcKinds.SetSettings => IpcProtocol.Envelope(IpcKinds.SetSettings,
                     await _operations.SetSettingsAsync(
                         envelope.PayloadAs<SetSettingsRequest>()

@@ -41,20 +41,39 @@ public sealed class HostRuntime
         {
             var settingsStore = new SettingsStore();
             using var systemEvents = new MessageOnlyWindow();
-            var deliveryQueue = new Delivery.DeliveryQueue();
-            var deliveryWorker = new Delivery.DeliveryWorker(deliveryQueue, settingsStore, log);
-            var service = new HostService(settingsStore, systemEvents, log, deliveryQueue, deliveryWorker);
+            var transferQueue = new Transfers.TransferQueue();
+            using var transferWorker = new Transfers.TransferWorker(transferQueue, settingsStore, log);
+            var service = new HostService(settingsStore, systemEvents, log, transferQueue, transferWorker);
 
             // SPEC §6: recover interrupted sessions BEFORE accepting new work.
             await service.RunRecoveryScanAsync(cancellationToken).ConfigureAwait(false);
 
-            // SPEC §7: reclaim disk from sessions that are delivered, verified, and
+            // SPEC §7: reclaim disk from sessions that are transferred, verified, and
             // past their retention period. Host start is the natural moment — the
             // machine is idle and nothing is recording yet.
-            new Delivery.RetentionCleaner(deliveryQueue, settingsStore, log).Clean(DateTimeOffset.UtcNow);
+            new Transfers.RetentionCleaner(transferQueue, settingsStore, log).Clean(DateTimeOffset.UtcNow);
 
-            using var deliveryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            Task deliveryTask = deliveryWorker.RunAsync(deliveryCts.Token);
+            // And then the history of those now-deleted recordings. Order matters:
+            // the cleaner decides what to delete by asking the queue what completed,
+            // so pruning first would make it keep everything for ever. See
+            // TransferQueue.Prune.
+            int pruned = transferQueue.Prune(DateTimeOffset.UtcNow);
+            if (pruned > 0)
+            {
+                log.Information(
+                    "Removed {Count} transfer records older than {Days} days whose recordings are gone",
+                    pruned, Transfers.TransferQueue.HistoryWindow.TotalDays);
+            }
+
+            // Transfers that stopped on a bad credential are excluded from the due
+            // list, so nothing would ever pick them up again on its own. A host start
+            // is the other natural moment (besides saving settings) at which the
+            // credential may have been fixed since. Re-arming costs one attempt, and
+            // one that is still wrong simply pauses again.
+            transferQueue.ResumeAuthPaused();
+
+            using var transferCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Task transferTask = transferWorker.RunAsync(transferCts.Token);
 
             await using var ipcServer = new IpcServer(service, _hostVersion, log);
             ipcServer.Start();
@@ -68,8 +87,8 @@ public sealed class HostRuntime
                 if (!service.IsBusy && DateTimeOffset.UtcNow - service.LastActivityUtc > IdleExitDelay)
                 {
                     log.Information("Host idle for {Idle} — exiting (nothing runs when nothing records)", IdleExitDelay);
-                    await deliveryCts.CancelAsync().ConfigureAwait(false);
-                    await deliveryTask.ConfigureAwait(false);
+                    await transferCts.CancelAsync().ConfigureAwait(false);
+                    await transferTask.ConfigureAwait(false);
                     return 0;
                 }
             }

@@ -31,13 +31,44 @@ public static class EncoderTrial
         var arguments = new List<string>
         {
             "-hide_banner", "-nostats", "-loglevel", "error", "-y",
+        };
+        // The trial must exercise the plan's REAL capture path — GDI capture needs
+        // its inputs declared here exactly as a real recording would declare them.
+        arguments.AddRange(FilterGraphBuilder.BuildInputArguments(plan));
+        arguments.AddRange(
+        [
             "-filter_complex", FilterGraphBuilder.Build(plan, arrangement),
             "-map", "[v]",
             "-c:v", plan.Encoder.CodecName,
-        };
+        ]);
         arguments.AddRange(plan.Encoder.QualityArguments);
         arguments.AddRange(["-t", seconds.ToString(CultureInfo.InvariantCulture), "-f", "matroska", outputPath]);
 
+        try
+        {
+            return await RunAndProbeAsync(
+                ffmpegPath, ffprobePath, arguments, outputPath, arrangement, seconds, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            // The trial file has served its purpose the moment the result is known.
+            // Leaving it behind put a stray .mkv in every session folder, inflated the
+            // reported size of the recording, and sat next to the real footage looking
+            // like part of it. Deleted on every path, pass or fail.
+            TryDelete(outputPath);
+        }
+    }
+
+    private static async Task<TrialResult> RunAndProbeAsync(
+        string ffmpegPath,
+        string ffprobePath,
+        IReadOnlyList<string> arguments,
+        string outputPath,
+        ArrangementPlan arrangement,
+        int seconds,
+        CancellationToken cancellationToken)
+    {
         (int exitCode, string stderr) = await RunProcessAsync(ffmpegPath, arguments, TrialTimeout + TimeSpan.FromSeconds(seconds), cancellationToken)
             .ConfigureAwait(false);
 
@@ -89,6 +120,22 @@ public static class EncoderTrial
         return TrialResult.Passed(output.Length, TimeSpan.FromSeconds(seconds));
     }
 
+    /// <summary>Removes the trial file. A file we cannot delete is not worth failing
+    /// a recording over — the next trial overwrites it (<c>-y</c>) anyway.</summary>
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
     private static async Task<(int ExitCode, string Output)> RunProcessAsync(
         string fileName, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -129,10 +176,27 @@ public static class EncoderTrial
         return (process.ExitCode, stdout.Length > 0 ? stdout : stderr);
     }
 
+    /// <summary>
+    /// The most useful 400 characters of ffmpeg's complaint: the FIRST lines as well
+    /// as the last.
+    /// </summary>
+    /// <remarks>
+    /// This used to keep only the tail, and that hid a real bug for a long time. When
+    /// the filter graph itself is rejected, ffmpeg says why on the very first line
+    /// ("Padded dimensions cannot be smaller than input dimensions") and then prints
+    /// several lines of consequences. Keeping only the tail reported every candidate
+    /// as failing with a bare "Invalid argument", which reads like broken hardware and
+    /// sent the diagnosis in entirely the wrong direction.
+    /// </remarks>
     private static string Tail(string text)
     {
         string trimmed = text.Trim();
-        return trimmed.Length <= 300 ? trimmed : trimmed[^300..];
+        if (trimmed.Length <= 400)
+        {
+            return trimmed;
+        }
+
+        return trimmed[..200] + " […] " + trimmed[^200..];
     }
 }
 

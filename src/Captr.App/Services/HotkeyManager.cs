@@ -6,9 +6,11 @@ using Captr.Core.Interop;
 namespace Captr.App.Services;
 
 /// <summary>
-/// Global hotkeys for start/pause/stop (SPEC §9). Owns registration against the
-/// main window and the conflict message when another application already owns a
-/// combination — registration failure is reported in plain language, never silent.
+/// Global hotkeys (SPEC §9). Owns registration against the main window and the
+/// conflict message when another application already owns a combination —
+/// registration failure is reported in plain language, never silent. What each
+/// combination DOES is decided by the caller; Captr registers two toggles
+/// (start/stop and pause/resume).
 /// </summary>
 public sealed class HotkeyManager : IDisposable
 {

@@ -330,7 +330,7 @@ public sealed class FinalizationPipeline
     }
 }
 
-/// <summary>What finalisation produced, for reporting and delivery hand-off.</summary>
+/// <summary>What finalisation produced, for reporting and transfer hand-off.</summary>
 public sealed record FinalizationResult(
     SessionStarted Session,
     IReadOnlyList<string> OutputFiles,

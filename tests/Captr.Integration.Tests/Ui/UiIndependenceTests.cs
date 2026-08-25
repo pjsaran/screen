@@ -40,7 +40,9 @@ public class UiIndependenceTests
         string workingRoot = Directory.CreateTempSubdirectory("captr-uikill-").FullName;
 
         KillAll();
-        string? savedSettings = BackUpSettings();
+        // Drives the REAL captr executable, which reads and writes the real
+        // settings file. The guard puts it back exactly as it was.
+        using var settingsGuard = new RealSettingsGuard();
         try
         {
             RunCli(cli, "settings", "set", "workingFolder", workingRoot).ExitCode.ShouldBe(0);
@@ -89,7 +91,6 @@ public class UiIndependenceTests
         finally
         {
             KillAll();
-            RestoreSettings(savedSettings);
             try
             {
                 Directory.Delete(workingRoot, recursive: true);
@@ -152,23 +153,6 @@ public class UiIndependenceTests
         return (process.ExitCode, output);
     }
 
-    private static string SettingsPath() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Captr", "settings.json");
-
-    private static string? BackUpSettings() =>
-        File.Exists(SettingsPath()) ? File.ReadAllText(SettingsPath()) : null;
-
-    private static void RestoreSettings(string? saved)
-    {
-        if (saved is not null)
-        {
-            File.WriteAllText(SettingsPath(), saved);
-        }
-        else if (File.Exists(SettingsPath()))
-        {
-            File.Delete(SettingsPath());
-        }
-    }
 
     private static void KillAll()
     {

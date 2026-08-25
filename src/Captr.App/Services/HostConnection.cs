@@ -11,6 +11,8 @@ namespace Captr.App.Services;
 /// </summary>
 public sealed class HostConnection : IAsyncDisposable
 {
+    /// <summary>What the UI shows when no host is running: nothing is recording.
+    /// Constructed once because it is compared and assigned on every poll.</summary>
     private static readonly StatusResponse IdleStatus =
         new("idle", null, null, null, null, null, null, null, null);
 

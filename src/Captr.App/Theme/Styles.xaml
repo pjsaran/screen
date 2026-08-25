@@ -1,0 +1,491 @@
+<!--
+    Captr's design system: the typography scale, the semantic colours, the spacing
+    rhythm, and the handful of shared control styles every page is built from.
+
+    Why it exists: consistency is the whole difference between "a few WPF pages" and
+    "an application". Every page pulls its text sizes, card chrome, section headers,
+    and status colours from HERE, so changing the look is one edit, and a new page
+    cannot accidentally invent its own.
+
+    Two rules that keep it working in both light and dark:
+
+    1. Foreground colours are NEVER hard-coded. They come from WPF-UI's theme
+       resources as DynamicResource, which is what makes the whole UI follow the
+       system light/dark theme and accent colour with no code (SPEC §9).
+
+    2. Where a coloured surface is needed (a status pill), it is a LOW-ALPHA tint of
+       the semantic hue rather than the solid colour. A solid green with the theme's
+       primary text on top is unreadable in light mode — near-black on dark green —
+       which is exactly the bug this replaced. A ~18% tint composites over whatever
+       surface is behind it, so the theme's own green/amber/red foreground reads
+       clearly against it in BOTH themes.
+
+    The type scale, and when to use each step:
+      Display  20   the one thing a page is about (a page title, the live state)
+      Title    15   a section heading
+      Body     13   everything normal
+      Caption  11.5 supporting detail, always in the secondary text colour
+      Micro    10.5 uppercase, tracked: column headers and pills (see Theme/Typo.cs)
+-->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:system="clr-namespace:System;assembly=System.Runtime"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:theme="clr-namespace:Captr.App.Theme"
+    xmlns:views="clr-namespace:Captr.App.Views">
+
+    <!-- ==== Typography =========================================================
+         Segoe UI Variable is the Windows 11 UI face: it is an optical-size family,
+         so the Display cut is drawn for headings (tighter, more contrast) and the
+         Text cut for small sizes (open, more legible). Using the right cut for the
+         right size is most of what makes Windows 11's own UI look considered, and
+         costs nothing to adopt. The fallback chain keeps Windows 10 and older
+         looking right rather than dropping to a serif. -->
+    <FontFamily x:Key="UiFont">Segoe UI Variable Text, Segoe UI, sans-serif</FontFamily>
+    <FontFamily x:Key="UiDisplayFont">Segoe UI Variable Display, Segoe UI Semibold, Segoe UI, sans-serif</FontFamily>
+    <FontFamily x:Key="UiSmallFont">Segoe UI Variable Small, Segoe UI Variable Text, Segoe UI, sans-serif</FontFamily>
+
+    <!-- A monospaced face for paths, file names, timers, and server messages, where
+         character alignment carries meaning. -->
+    <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas, Courier New, monospace</FontFamily>
+
+    <system:Double x:Key="PageTitleSize">26</system:Double>
+    <system:Double x:Key="DisplaySize">20</system:Double>
+    <system:Double x:Key="TitleSize">15</system:Double>
+    <system:Double x:Key="BodySize">13</system:Double>
+    <!-- What the user TYPES into: one step below body. Fields at body size crowded
+         their own labels and hints; a step down makes a form read label → value →
+         hint instead of three lines of the same weight. -->
+    <system:Double x:Key="FieldSize">12</system:Double>
+    <system:Double x:Key="CaptionSize">11.5</system:Double>
+    <system:Double x:Key="MicroSize">10.5</system:Double>
+
+    <!-- ==== Spacing ============================================================
+         One rhythm, in multiples of 4. Pages use PagePadding at their edges and
+         CardGap between cards; nothing invents its own margins. -->
+    <Thickness x:Key="PagePadding">20,16,20,20</Thickness>
+    <Thickness x:Key="CardPadding">14</Thickness>
+    <Thickness x:Key="CardGap">0,0,0,10</Thickness>
+    <Thickness x:Key="RowGap">0,0,0,6</Thickness>
+
+    <!-- ==== Semantic tints =====================================================
+         Backgrounds for status chips. Alpha is deliberate: these composite over the
+         card behind them, so one value works in light and dark. Pair each with the
+         matching WPF-UI SystemFillColor*Brush as the FOREGROUND. -->
+    <SolidColorBrush x:Key="SuccessTintBrush" Color="#2E10893E" />
+    <SolidColorBrush x:Key="SuccessEdgeBrush" Color="#5A10893E" />
+    <SolidColorBrush x:Key="CautionTintBrush" Color="#2E9D5D00" />
+    <SolidColorBrush x:Key="CautionEdgeBrush" Color="#5A9D5D00" />
+    <SolidColorBrush x:Key="CriticalTintBrush" Color="#2EC42B1C" />
+    <SolidColorBrush x:Key="CriticalEdgeBrush" Color="#5AC42B1C" />
+    <SolidColorBrush x:Key="NeutralTintBrush" Color="#22808080" />
+    <SolidColorBrush x:Key="NeutralEdgeBrush" Color="#44808080" />
+    <SolidColorBrush x:Key="InfoTintBrush" Color="#2A0078D4" />
+    <SolidColorBrush x:Key="InfoEdgeBrush" Color="#550078D4" />
+
+    <!-- ==== Text styles ======================================================== -->
+    <!-- The page's name, at the top of every page. Bigger and heavier than anything
+         else on the page so it reads as a title rather than as the first line of the
+         content. -->
+    <Style x:Key="PageTitleText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource UiDisplayFont}" />
+        <Setter Property="FontSize" Value="{StaticResource PageTitleSize}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="DisplayText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource UiDisplayFont}" />
+        <Setter Property="FontSize" Value="{StaticResource DisplaySize}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <Style x:Key="TitleText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource TitleSize}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="BodyText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource BodySize}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="CaptionText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource CaptionSize}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <!-- The uppercase micro-label: column headers and field captions. Always paired
+         with theme:Typo.Text (see Theme/Typo.cs) so the capitals are tracked; set
+         plain Text on this style and the letters will jam together. -->
+    <Style x:Key="MicroLabel" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource UiSmallFont}" />
+        <Setter Property="FontSize" Value="{StaticResource MicroSize}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <!-- Paths, file names, and verbatim server messages. -->
+    <Style x:Key="MonoText" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+        <Setter Property="FontSize" Value="{StaticResource CaptionSize}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <!-- A number meant to be read as data: tabular figures line up down a column,
+         which is the whole point of a column. -->
+    <Style x:Key="FigureText" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+        <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+    </Style>
+
+    <!-- ==== Surfaces ===========================================================
+         THE RULE, so every page reaches for the same thing:
+
+           Card       the page-level container. Everything on a page lives in one.
+                      Always this surface - never a bare list on the window
+                      background, and never a grey block standing in for a card.
+
+           TableCard  a Card with no padding, for a table that runs edge to edge.
+
+           TableRow   one row of a list. Flat, with a hairline underneath. This is
+                      how EVERY list of things is drawn - recordings, transfers,
+                      diagnostics - so moving between those pages does not mean
+                      re-learning the layout.
+
+           ListRow    a nested item INSIDE a card: a display tile, a destination.
+                      Never the page-level list itself.
+
+         Before this rule, Recordings drew its list as floating grey blocks on the
+         window background while Transfers drew the same idea as a flat table and
+         Home used white cards - three looks for one concept, and the pages visibly
+         jumped as you moved between them. -->
+    <Style x:Key="Card" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="{StaticResource CardPadding}" />
+        <Setter Property="Margin" Value="{StaticResource CardGap}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <!-- A card holding a table: no padding, so the header strip and the row rules
+         run the full width instead of floating inside a margin. -->
+    <Style x:Key="TableCard" TargetType="Border" BasedOn="{StaticResource Card}">
+        <Setter Property="Padding" Value="0" />
+    </Style>
+
+    <!-- A nested item INSIDE a card: a display tile, a destination row. Flatter than
+         a card so a group of them reads as one list rather than as separate objects.
+         Never used for a page-level list - see the rule above. -->
+    <Style x:Key="ListRow" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="Margin" Value="{StaticResource RowGap}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <!-- A denser row for a real table: no border, a hairline rule underneath, and
+         just enough padding to keep it readable. Twenty of these read as one table
+         rather than twenty cards. -->
+    <Style x:Key="TableRow" TargetType="Border">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <!-- The header strip above a TableRow list. Its top corners are rounded to sit
+         flush inside a TableCard; 7 rather than 8 so it tucks inside the border
+         rather than fighting it. -->
+    <Style x:Key="TableHeader" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="CornerRadius" Value="7,7,0,0" />
+        <Setter Property="Padding" Value="14,7" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <!-- ==== Status chips =======================================================
+         Small capsules that let a state be read without reading words. Semantic,
+         never decorative: green = done, amber = attention, red = failed, grey =
+         nothing to do, blue = happening now.
+
+         Each is a tint background + a matching theme foreground + a faint edge. The
+         edge matters at these sizes: an 18% tint alone is almost invisible on a
+         busy surface, and the outline is what makes it read as a chip. -->
+    <Style x:Key="Pill" TargetType="Border">
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="8,3" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="MinWidth" Value="92" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="Background" Value="{StaticResource NeutralTintBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource NeutralEdgeBrush}" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <Style x:Key="PillText" TargetType="TextBlock" BasedOn="{StaticResource MicroLabel}">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="TextTrimming" Value="None" />
+    </Style>
+
+    <!-- ==== Action buttons =====================================================
+         Every button the application owns. Uppercase and letter-spaced to match the
+         navigation rail, the column headers, and the status chips, so a page reads
+         as one designed thing rather than as labels in one voice and actions in
+         another.
+
+         Deliberately a KEYED style, not an implicit one for ui:Button. WPF-UI builds
+         its own controls out of ui:Button — the up/down chevrons on a NumberBox are
+         two of them — and an implicit style would replace their icon content with a
+         tracked string, turning the chevrons into nothing. Naming the style means it
+         applies to our buttons and only ours.
+
+         The ContentTemplate is what performs the transformation, so button labels
+         stay written in ordinary sentence case in the XAML. That matters: the label
+         is what the code, the tooltips, and the documentation all refer to, and
+         "Retry all failed" is greppable in a way "R E T R Y   A L L   F A I L E D"
+         is not. -->
+    <Style x:Key="ActionButton" TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+        <!-- Height is FIXED rather than left to padding plus content. Padding-derived
+             heights drifted apart as soon as one button had a different font or a
+             different label, which is how the same word ended up two sizes on two
+             pages. -->
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="ContentTemplate">
+            <Setter.Value>
+                <DataTemplate>
+                    <TextBlock theme:Typo.Text="{Binding}"
+                               FontFamily="{StaticResource UiSmallFont}"
+                               FontSize="{StaticResource MicroSize}"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               TextTrimming="None" />
+                </DataTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- SIZE FOLLOWS PLACEMENT, not the word on the button. A button in a page
+         header or a hero card is a page-level action and gets the full height; the
+         same word inside a table row is a row action and gets the compact one. That
+         is why Stop on Home is larger than Stop on a transfer row - they act on
+         different things. -->
+    <Style x:Key="RowActionButton" TargetType="ui:Button" BasedOn="{StaticResource ActionButton}">
+        <Setter Property="Height" Value="26" />
+        <Setter Property="Padding" Value="12,0" />
+    </Style>
+
+    <!-- The overflow "..." button. Same height as the row buttons beside it - it used
+         to carry its own padding and sat a pixel taller than its own neighbours. -->
+    <Style x:Key="OverflowButton" TargetType="ui:Button" BasedOn="{StaticResource RowActionButton}">
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="MinWidth" Value="34" />
+    </Style>
+
+    <!-- A square icon-only row action (edit, delete). Deliberately NOT based on
+         ActionButton: its ContentTemplate renders content as tracked text, which
+         would erase an icon. Always pair with a ToolTip — an icon with no name is a
+         guessing game. -->
+    <Style x:Key="IconRowButton" TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+        <Setter Property="Height" Value="26" />
+        <Setter Property="MinWidth" Value="30" />
+        <Setter Property="Padding" Value="5,0" />
+    </Style>
+
+    <!-- ==== Section header =====================================================
+         A title with an optional one-line explanation underneath. Used at the top of
+         every settings group so a novice never has to guess what a group is for. -->
+    <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource TitleText}">
+        <Setter Property="Margin" Value="0,0,0,2" />
+    </Style>
+
+    <Style x:Key="SectionHint" TargetType="TextBlock" BasedOn="{StaticResource CaptionText}">
+        <Setter Property="Margin" Value="0,0,0,10" />
+    </Style>
+
+    <!-- Label above an individual field: the same uppercase, tracked micro-voice as
+         column headers and the navigation rail, so every label in the application
+         speaks alike. ALWAYS set the text with theme:Typo.Text (never plain Text) —
+         that is what upper-cases and letter-spaces it; see Theme/Typo.cs. -->
+    <Style x:Key="FieldLabel" TargetType="TextBlock" BasedOn="{StaticResource MicroLabel}">
+        <Setter Property="Margin" Value="0,0,0,5" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+    </Style>
+
+    <!-- The short helper line under a field. One style, so every hint in the
+         application sits at the same size and distance from its field. -->
+    <Style x:Key="FieldHint" TargetType="TextBlock" BasedOn="{StaticResource CaptionText}">
+        <Setter Property="Margin" Value="0,5,0,12" />
+    </Style>
+
+    <!-- ==== Inline messages ====================================================
+         Save confirmations, validation errors, command results. -->
+    <Style x:Key="SuccessText" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+    </Style>
+
+    <Style x:Key="WarningText" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
+    </Style>
+
+    <Style x:Key="ErrorText" TargetType="TextBlock" BasedOn="{StaticResource BodyText}">
+        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+    </Style>
+
+    <!-- ==== Progress ===========================================================
+         A thin, unobtrusive bar for a transfer in flight. Deliberately 3px: it says
+         "this is moving" from across the room without becoming the loudest thing on
+         a page full of finished rows. -->
+    <Style x:Key="TransferProgress" TargetType="ProgressBar">
+        <Setter Property="Height" Value="3" />
+        <Setter Property="Minimum" Value="0" />
+        <Setter Property="Maximum" Value="1" />
+        <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <!-- ==== Navigation =========================================================
+         The left rail. Built from a ListBox rather than a NavigationView so the
+         items stay compact and the selection marker is the thin accent bar Windows
+         11 uses, instead of a full-width highlight. Items are uppercase and tracked
+         (theme:Typo.Text on the item content) — at rail size that reads as
+         navigation rather than as body text that happens to be clickable. -->
+    <Style x:Key="NavItem" TargetType="ListBoxItem">
+        <Setter Property="FontFamily" Value="{StaticResource UiSmallFont}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="Height" Value="36" />
+        <Setter Property="Margin" Value="0,1" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="Root" CornerRadius="5" Background="Transparent" SnapsToDevicePixels="True">
+                        <Grid>
+                            <!-- The selection marker: a 3px accent bar on the left. -->
+                            <Border x:Name="Marker" Width="3" Height="18" CornerRadius="2"
+                                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                                    Background="{DynamicResource AccentFillColorDefaultBrush}"
+                                    Opacity="0" />
+                            <ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Root" Property="Background"
+                                    Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Root" Property="Background"
+                                    Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                            <Setter TargetName="Marker" Property="Opacity" Value="1" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ==== Defaults ===========================================================
+         Applied to every control of the type, so pages do not repeat them. -->
+    <Style TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource BodySize}" />
+    </Style>
+
+    <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource BodySize}" />
+        <Setter Property="Margin" Value="0,3" />
+    </Style>
+
+    <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource FieldSize}" />
+    </Style>
+
+    <!--
+        Keyed AND implicit. The keyed copy is what HotkeyBox derives from below: WPF
+        applies an implicit style only to the EXACT type it targets, so a class that
+        derives from TextBox silently falls back to the plain WPF template and ends up
+        shorter and squarer than every field beside it.
+    -->
+    <Style x:Key="AppTextBox" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource FieldSize}" />
+    </Style>
+
+    <Style TargetType="TextBox" BasedOn="{StaticResource AppTextBox}" />
+
+    <Style TargetType="{x:Type views:HotkeyBox}" BasedOn="{StaticResource AppTextBox}" />
+
+    <!-- WPF-UI's TextBox and the plain PasswordBox are separate types, so each needs
+         the field size stated for itself or it silently stays at the default. -->
+    <Style TargetType="ui:TextBox" BasedOn="{StaticResource {x:Type ui:TextBox}}">
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource FieldSize}" />
+    </Style>
+
+    <Style TargetType="PasswordBox" BasedOn="{StaticResource {x:Type PasswordBox}}">
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource FieldSize}" />
+    </Style>
+
+    <!--
+        Number fields.
+
+        ClearButtonEnabled is off because the X sits ON TOP of the digits the moment
+        the field has focus - in a 130 px box showing "86400" the number disappears
+        behind it. Clearing a required number to nothing is not a useful gesture
+        anyway; every one of these fields has a minimum.
+
+        The spinners go for the same reason: they take the same corner, and nobody
+        nudges a 1800-second ceiling one second at a time.
+
+        The rest keeps the field genuinely numeric - no decimal point, no arithmetic
+        expressions, and anything else typed is put back the way it was.
+    -->
+    <!-- BasedOn matters: without it this REPLACES the WPF-UI template and the
+         field falls back to plain WPF chrome - thinner, squarer, and visibly
+         unlike every other field on the page. -->
+    <Style x:Key="NumberField" TargetType="ui:NumberBox" BasedOn="{StaticResource {x:Type ui:NumberBox}}">
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="{StaticResource FieldSize}" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="Width" Value="130" />
+        <Setter Property="ClearButtonEnabled" Value="False" />
+        <Setter Property="SpinButtonPlacementMode" Value="Hidden" />
+        <Setter Property="MaxDecimalPlaces" Value="0" />
+        <Setter Property="AcceptsExpression" Value="False" />
+        <Setter Property="ValidationMode" Value="InvalidInputOverwritten" />
+    </Style>
+</ResourceDictionary>

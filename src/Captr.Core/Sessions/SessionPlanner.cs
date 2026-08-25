@@ -29,11 +29,13 @@ public sealed class SessionPlanner
     /// </summary>
     /// <param name="settings">Validated settings (the caller loads them).</param>
     /// <param name="frameRateOverride">CLI/UI per-session override, if any.</param>
-    /// <param name="qualityPresetOverride">CLI/UI per-session override, if any.</param>
+    /// <param name="qualityOverride">CLI/UI per-session quality-level override, if any.</param>
+    /// <param name="speedPresetOverride">CLI/UI per-session speed-preset override, if any.</param>
     public async Task<(RecordingSession.SessionContext Context, SessionStarted StartEvent)> PlanAsync(
         CaptrSettings settings,
         int? frameRateOverride,
-        string? qualityPresetOverride,
+        string? qualityOverride,
+        string? speedPresetOverride,
         string? label,
         CancellationToken cancellationToken)
     {
@@ -70,44 +72,71 @@ public sealed class SessionPlanner
             DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + "-" + sessionId.ToString("N")[..8]);
 
         int frameRate = frameRateOverride ?? settings.FrameRate;
-        QualityPreset preset = QualityPresets.Find(qualityPresetOverride ?? settings.QualityPreset)
+
+        string qualityName = qualityOverride ?? settings.Quality;
+        QualityLevel quality = QualityLevels.Find(qualityName)
             ?? throw new SessionStartException(
-                $"Unknown quality preset '{qualityPresetOverride ?? settings.QualityPreset}'. " +
-                $"Available: {string.Join(", ", QualityPresets.All.Select(p => p.Name))}.");
+                $"Unknown quality level '{qualityName}'. " +
+                $"Available: {string.Join(", ", QualityLevels.All.Select(q => q.Name))}.");
+
+        string speedName = speedPresetOverride ?? settings.SpeedPreset;
+        SpeedPreset speed = SpeedPresets.Find(speedName)
+            ?? throw new SessionStartException(
+                $"Unknown speed preset '{speedName}'. " +
+                $"Available: {string.Join(", ", SpeedPresets.All.Select(p => p.Name))}.");
 
         var template = new RecordingPlan
         {
             SessionId = sessionId,
-            Sources = [.. selection.Included.Select(d => new CaptureSource(d.DxgiOutputIndex, d.Width, d.Height))],
+            Sources = [.. selection.Included.Select(d =>
+                new CaptureSource(d.DxgiOutputIndex, d.Width, d.Height, d.VirtualX, d.VirtualY))],
             FrameRate = frameRate,
             Encoder = new EncoderSettings("placeholder", []),
             OverlayText = null,
             WorkingFolder = workingFolder,
         };
 
-        // 4. Prove an encoder (SPEC §5) and measure the rate (SPEC §6).
+        // 4. Prove an encoder and learn its rate (SPEC §5/§6). Both come from the same
+        //    step: on the first recording for this machine and these settings it runs
+        //    one trial encode; afterwards it is a cache read, which is what makes
+        //    pressing Record feel instant.
         string ffmpegPath = FfmpegLocator.FindFfmpeg();
         string ffprobePath = FfmpegLocator.FindFfprobe();
-        string appVersion = typeof(SessionPlanner).Assembly.GetName().Version?.ToString() ?? "0";
 
-        var selector = new EncoderSelector(ffmpegPath, ffprobePath, new EncoderCache(), _log);
+        // The SAME identity HealthReport uses when it re-derives the fingerprint for
+        // the Diagnostics "Encoder" check. These two must agree or the check can
+        // never find the cache — which is exactly what happened when this read the
+        // four-part assembly version ("0.1.1.0") while diagnostics used the semantic
+        // one ("0.1.1"): every recording proved an encoder and the page still said
+        // "not measured yet". The informational version also carries the commit, so
+        // a rebuilt app re-proves rather than trusting a cache it did not write.
+        string appVersion = Captr.Core.Common.BuildInfo.Current().InformationalVersion;
+
+        var encoderCache = new EncoderCache();
+        var selector = new EncoderSelector(ffmpegPath, ffprobePath, encoderCache, _log);
         EncoderSelection encoderSelection;
         try
         {
             encoderSelection = await selector.SelectAsync(
-                template, preset, settings.QualityOverride, appVersion, cancellationToken).ConfigureAwait(false);
+                template, speed, quality, appVersion, cancellationToken).ConfigureAwait(false);
         }
         catch (EncoderSelectionException exception)
         {
             throw new SessionStartException("No working encoder was found on this machine.\n" + exception.Message);
         }
 
-        RecordingPlan plan = template with { Encoder = encoderSelection.Encoder };
-        SizeEstimate estimate = await SizeEstimator.MeasureAsync(ffmpegPath, ffprobePath, plan, cancellationToken)
-            .ConfigureAwait(false);
+        // The capture method travels with the encoder: whichever combination passed
+        // the trial is the combination the recording runs — on a virtual desktop
+        // that means GDI capture, chosen automatically.
+        RecordingPlan plan = template with
+        {
+            Encoder = encoderSelection.Encoder,
+            CaptureMethod = encoderSelection.CaptureMethod,
+        };
 
-        // 5. Disk preflight against the measured rate (SPEC §6).
-        var diskGuard = new DiskGuard(workingFolder, estimate.BytesPerHour);
+        // 5. Disk preflight against the MEASURED rate (SPEC §5/§6) — the rate the
+        // encoder trial actually wrote at on this canvas, never a hardcoded table.
+        var diskGuard = new DiskGuard(workingFolder, encoderSelection.BytesPerHour);
         PreflightResult preflight = diskGuard.Preflight(
             new DriveInfo(Path.GetPathRoot(settings.WorkingFolder)!).AvailableFreeSpace);
         if (!preflight.CanStart)
@@ -116,16 +145,18 @@ public sealed class SessionPlanner
         }
 
         // 6. Software fallback arguments (SPEC §6's one fallback), when available
-        //    and when the selected encoder is itself hardware.
+        //    and when the selected encoder is itself hardware. The fallback encoder
+        //    is whichever software tier the shipped build carries — libx264 when the
+        //    GPL build is pinned, otherwise libopenh264.
         IReadOnlyList<string>? fallback = null;
         FfmpegCapabilities capabilities = FfmpegCapabilities.LoadFrom(ffmpegPath);
-        if (!encoderSelection.IsSoftware && capabilities.HasOpenH264)
+        if (!encoderSelection.IsSoftware && EncoderCatalog.SoftwareFallback(capabilities) is { } softwareEncoder)
         {
             ArrangementPlan arrangement = ArrangementPlanner.Plan(plan.Sources);
             fallback = FfmpegArgumentBuilder.Build(plan with
             {
-                Encoder = new EncoderSettings("libopenh264", QualityPresets.BuildQualityArguments(
-                    "libopenh264", preset, null, arrangement.CanvasWidth, arrangement.CanvasHeight, frameRate)),
+                Encoder = new EncoderSettings(softwareEncoder, QualityLevels.BuildEncoderArguments(
+                    softwareEncoder, speed, quality, arrangement.CanvasWidth, arrangement.CanvasHeight, frameRate)),
             });
         }
 
@@ -153,7 +184,8 @@ public sealed class SessionPlanner
             CanvasHeight = finalArrangement.CanvasHeight,
             FrameRate = frameRate,
             EncoderName = encoderSelection.Encoder.CodecName,
-            QualityPreset = preset.Name,
+            Quality = quality.Name,
+            SpeedPreset = speed.Name,
             EncoderArguments = FfmpegArgumentBuilder.Build(plan),
             WorkingFolder = workingFolder,
             Label = label,
@@ -161,7 +193,8 @@ public sealed class SessionPlanner
 
         var context = new RecordingSession.SessionContext(
             sessionId, workingFolder, ffmpegPath, ffprobePath, plan, fallback,
-            estimate.BytesPerHour, settings.ExcludedDisplayIds, preset.Name);
+            encoderSelection.BytesPerHour, settings.ExcludedDisplayIds, quality.Name, speed.Name,
+            encoderSelection.FromCache ? encoderCache : null);
 
         return (context, startEvent);
     }

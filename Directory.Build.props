@@ -35,6 +35,13 @@
     <Product>Captr</Product>
     <NeutralLanguage>en</NeutralLanguage>
 
+    <!-- Captr's own text is English only, so the translated resource assemblies that
+         dependencies bring along (WPF-UI, MSAL, and others) only translate THEIR
+         messages inside an otherwise English application — a mixed-language result
+         that is worse than plain English. Restricting satellites to 'en' also drops
+         thirteen extra folders from the install payload. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
     <!-- Deterministic, self-contained-friendly output. -->
     <Deterministic>true</Deterministic>
     <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>

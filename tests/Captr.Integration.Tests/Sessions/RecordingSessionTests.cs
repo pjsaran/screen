@@ -24,7 +24,7 @@ public class RecordingSessionTests : IDisposable
 
         var planner = new SessionPlanner(Logger.None);
         (RecordingSession.SessionContext context, SessionStarted startEvent) =
-            await planner.PlanAsync(settings, null, null, label: null, TestContext.Current.CancellationToken);
+            await planner.PlanAsync(settings, null, null, null, label: null, TestContext.Current.CancellationToken);
 
         RecordingSession session = RecordingSession.Create(context, startEvent, Logger.None);
         Task<FinalizationResult> run = session.RunAsync(CancellationToken.None);
@@ -81,7 +81,7 @@ public class RecordingSessionTests : IDisposable
         };
 
         SessionStartException exception = await Should.ThrowAsync<SessionStartException>(() =>
-            new SessionPlanner(Logger.None).PlanAsync(settings, null, null, null, TestContext.Current.CancellationToken));
+            new SessionPlanner(Logger.None).PlanAsync(settings, null, null, null, null, TestContext.Current.CancellationToken));
 
         exception.Message.ShouldContain("deselected");
     }

@@ -22,7 +22,8 @@ public class SessionJournalTests : IDisposable
         CanvasHeight = 1080,
         FrameRate = 15,
         EncoderName = "hevc_nvenc",
-        QualityPreset = "sharp-text",
+        Quality = "high",
+        SpeedPreset = "veryfast",
         EncoderArguments = ["-f", "lavfi", "-i", "testsrc2"],
         WorkingFolder = @"C:\work",
     };

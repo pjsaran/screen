@@ -11,6 +11,15 @@ namespace Captr.Core.Common;
 public static class AtomicFile
 {
     /// <summary>
+    /// How many times a read retries while a replace is in flight. Together with the
+    /// growing back-off in <see cref="ReadOrNull"/> this spans about 150 ms, which
+    /// comfortably covers the exclusive window ReplaceFile opens even on a machine
+    /// under heavy load. Raising it only makes a genuinely locked file slower to
+    /// report; lowering it risks reporting a live session as missing.
+    /// </summary>
+    private const int ReadRetryAttempts = 25;
+
+    /// <summary>
     /// Atomically replaces <paramref name="destinationPath"/> with
     /// <paramref name="content"/> (UTF-8, no BOM).
     /// </summary>
@@ -28,9 +37,15 @@ public static class AtomicFile
     /// opening the path sees either the old file or the new one, never a mixture.</item>
     /// </list>
     /// </remarks>
-    public static void Write(string destinationPath, string content)
+    /// <param name="keepPreviousVersion">
+    /// When true, the version being replaced is kept beside the file as
+    /// <c>name.bak</c>. The Win32 ReplaceFile API produces it as part of the SAME
+    /// atomic operation, so it costs one rename and no extra I/O.
+    /// </param>
+    public static void Write(string destinationPath, string content, bool keepPreviousVersion = false)
     {
         string tempPath = destinationPath + ".tmp";
+        string? backupPath = keepPreviousVersion ? destinationPath + ".bak" : null;
 
         using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
         using (var writer = new StreamWriter(stream))
@@ -53,7 +68,7 @@ public static class AtomicFile
             {
                 if (File.Exists(destinationPath))
                 {
-                    File.Replace(tempPath, destinationPath, destinationBackupFileName: null);
+                    File.Replace(tempPath, destinationPath, backupPath);
                 }
                 else
                 {
@@ -95,13 +110,19 @@ public static class AtomicFile
                 using var reader = new StreamReader(stream);
                 return reader.ReadToEnd();
             }
-            catch (FileNotFoundException) when (attempt < 5)
+            catch (FileNotFoundException) when (attempt < ReadRetryAttempts)
             {
                 // Empirically, ReplaceFile leaves a hair-thin window where the
                 // destination NAME is absent (observed by the stress test). A file
                 // that is genuinely missing is still missing after these retries;
                 // one that is being replaced reappears immediately.
-                Thread.Sleep(2);
+                //
+                // This shares the FULL retry budget with the IOException case below
+                // rather than getting a short one of its own. A flat 5 × 2 ms was not
+                // enough on a machine running a parallel build: the window outlasted
+                // it, ReadOrNull returned null, and a live heartbeat was reported as
+                // a missing session.
+                Backoff(attempt);
             }
             catch (FileNotFoundException)
             {
@@ -111,13 +132,34 @@ public static class AtomicFile
             {
                 return null;
             }
-            catch (IOException) when (attempt < 10)
+            catch (UnauthorizedAccessException) when (attempt < ReadRetryAttempts)
+            {
+                // Opening a file in the middle of ReplaceFile can come back as
+                // access-denied rather than as an IOException. Same cause, same fix.
+                Backoff(attempt);
+            }
+            catch (IOException) when (attempt < ReadRetryAttempts)
             {
                 // Mid-replace the destination is briefly held exclusively; back off
                 // so the retries span the window instead of all landing inside it.
-                // Worst case this costs ~20 ms — nothing for a 1 Hz heartbeat reader.
-                Thread.Sleep(2);
+                // The delay grows because the window is longer on a loaded machine:
+                // a flat 2 ms × 10 spent its whole budget inside a single stall
+                // under parallel builds, which is how this was found. The worst case
+                // is still ~150 ms — nothing for a 1 Hz heartbeat reader, and far
+                // better than reporting a healthy session as missing.
+                Backoff(attempt);
             }
         }
     }
+
+    /// <summary>
+    /// Reads the previous version kept by <c>Write(..., keepPreviousVersion: true)</c>,
+    /// or null when there is none. Used to recover a file that has gone missing or
+    /// become unreadable.
+    /// </summary>
+    public static string? ReadPreviousVersionOrNull(string path) => ReadOrNull(path + ".bak");
+
+    /// <summary>The growing back-off shared by every retryable read failure, so the
+    /// retries span the replace window instead of all landing inside it.</summary>
+    private static void Backoff(int attempt) => Thread.Sleep(Math.Min(2 + attempt, 10));
 }

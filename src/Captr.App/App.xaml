@@ -10,9 +10,14 @@
                 <!-- WPF UI theme resources: system theme + accent (SPEC §9). -->
                 <ui:ThemesDictionary Theme="Unknown" />
                 <ui:ControlsDictionary />
+                <!-- Captr's own design system, layered on top: typography, spacing,
+                     cards, pills, navigation. Every page draws from it. -->
+                <ResourceDictionary Source="pack://application:,,,/Theme/Styles.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
             <views:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility" />
+            <views:EmptyStringToVisibilityConverter x:Key="NonEmptyToVisibility" />
+            <views:CountToVisibilityConverter x:Key="CountToVisibility" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

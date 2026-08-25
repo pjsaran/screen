@@ -45,6 +45,17 @@ public static class EncodingConstants
     /// </summary>
     public static int GopCeiling(int frameRate) => frameRate * SegmentSeconds * 2;
 
+    /// <summary>
+    /// How long an encoder candidate is trial-encoded for. The trial does two jobs at
+    /// once: it proves the encoder works, and its output size is what the disk
+    /// preflight extrapolates from — so it must be long enough to see real screen
+    /// variation. Six seconds is the shortest that produced a stable rate in testing.
+    /// Shortening it makes the disk estimate noisier; lengthening it makes the FIRST
+    /// recording on a machine slower to start (later ones read the cache and do not
+    /// trial at all).
+    /// </summary>
+    public const int EncoderTrialSeconds = 6;
+
     /// <summary>Name of the machine-readable progress file FFmpeg appends to inside
     /// the session working folder. A FILE, not a pipe — a pipe dies with the host,
     /// and the encoder must outlive a host crash to be re-adopted (SPEC §4).</summary>

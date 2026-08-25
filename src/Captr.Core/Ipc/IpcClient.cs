@@ -123,7 +123,10 @@ public sealed class IpcClient : IAsyncDisposable
         // ShellExecuteEx starts the host with no inherited handles at all, which
         // is exactly the detachment SPEC §4 wants. The host is a WinExe, so no
         // console window appears.
-        Process.Start(new ProcessStartInfo
+        // The returned Process is disposed straight away: it is only a HANDLE to the
+        // host, not a claim on it, and the host keeps running regardless. Dropping it
+        // on the floor instead leaked one handle per launch.
+        using Process? host = Process.Start(new ProcessStartInfo
         {
             FileName = exePath,
             ArgumentList = { "--host" },

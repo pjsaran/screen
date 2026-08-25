@@ -14,7 +14,8 @@ public class SettingsChangePolicyTests
     private static CaptrSettings Running => CaptrSettings.CreateDefault() with
     {
         FrameRate = 15,
-        QualityPreset = "sharp-text",
+        Quality = "high",
+        SpeedPreset = "veryfast",
         ExcludedDisplayIds = [],
         WorkingFolder = @"C:\work",
     };
@@ -49,23 +50,24 @@ public class SettingsChangePolicyTests
     [Fact]
     public void Lowering_quality_is_permitted_and_raising_it_is_refused()
     {
-        SettingsChangePolicy.Evaluate(Running, Running with { QualityPreset = "compact" })
+        // A HIGHER CRF is a softer, cheaper picture, so moving to it is degrading.
+        SettingsChangePolicy.Evaluate(Running, Running with { Quality = "compact" })
             .DegradesRecording.ShouldBeTrue();
 
-        SettingsChangePolicy.Evaluate(Running, Running with { QualityPreset = "archival" })
+        SettingsChangePolicy.Evaluate(Running, Running with { Quality = "maximum" })
             .Allowed.ShouldBeFalse();
     }
 
     [Fact]
-    public void Raising_the_numeric_quality_override_is_refused()
+    public void Choosing_a_faster_preset_is_permitted_and_a_slower_one_is_refused()
     {
-        // A LOWER quantizer number means HIGHER quality — more work mid-recording.
-        CaptrSettings current = Running with { QualityOverride = 25 };
+        // A FASTER preset asks the encoder for less work per frame, which is the
+        // degrading direction even though the files get bigger.
+        SettingsChangePolicy.Evaluate(Running, Running with { SpeedPreset = "ultrafast" })
+            .DegradesRecording.ShouldBeTrue();
 
-        SettingsChangePolicy.Evaluate(current, current with { QualityOverride = 18 })
+        SettingsChangePolicy.Evaluate(Running, Running with { SpeedPreset = "fast" })
             .Allowed.ShouldBeFalse();
-        SettingsChangePolicy.Evaluate(current, current with { QualityOverride = 30 })
-            .Allowed.ShouldBeTrue();
     }
 
     [Fact]
@@ -109,7 +111,7 @@ public class SettingsChangePolicyTests
             OutputPattern = "{machine}-{date}",
             RetentionDays = 30,
             CloseToTray = false,
-            Hotkeys = new HotkeySettings { Stop = "Ctrl+Alt+F10" },
+            Hotkeys = new HotkeySettings { PauseToggle = "Ctrl+Alt+F10" },
         });
 
         verdict.Allowed.ShouldBeTrue();
@@ -120,7 +122,7 @@ public class SettingsChangePolicyTests
     public void Several_refusals_are_reported_together()
     {
         SettingsChangeVerdict verdict = SettingsChangePolicy.Evaluate(
-            Running, Running with { FrameRate = 60, QualityPreset = "archival", WorkingFolder = @"D:\x" });
+            Running, Running with { FrameRate = 60, Quality = "maximum", WorkingFolder = @"D:\x" });
 
         verdict.Rejections.Count.ShouldBe(3);
     }

@@ -8,8 +8,10 @@ using Captr.Core.Settings.Migrations;
 namespace Captr.Core.Settings;
 
 /// <summary>
-/// Loads and saves <c>settings.json</c> in the user's roaming application data
-/// (SPEC §8). Owns the file's location, atomic writes, migration-on-load, and
+/// Loads and saves <c>settings.json</c> in the user's local application data,
+/// beside everything else Captr keeps (see <see cref="DefaultSettingsPath"/> for why
+/// local rather than the roaming location SPEC §8 names). Owns the file's location,
+/// atomic writes, migration-on-load, and
 /// validation-on-save. If it fails, the user's configuration is lost or recording
 /// starts with settings the user never chose.
 /// </summary>
@@ -28,6 +30,14 @@ namespace Captr.Core.Settings;
 /// </remarks>
 public sealed class SettingsStore
 {
+    /// <summary>
+    /// How settings are written to disk — and the ONLY way they should ever be
+    /// rendered as JSON. Exposed as <see cref="JsonOptions"/> so that
+    /// <c>captr settings get</c> prints byte-for-byte what the file contains: enum
+    /// members as their names rather than integers, and absent fields omitted rather
+    /// than shown as null. Printing with different options produced output that
+    /// looked like a different file from the one on disk.
+    /// </summary>
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -36,10 +46,13 @@ public sealed class SettingsStore
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
+    /// <inheritdoc cref="SerializerOptions"/>
+    public static JsonSerializerOptions JsonOptions => SerializerOptions;
+
     private readonly string _settingsPath;
     private readonly SettingsMigrator _migrator;
 
-    /// <summary>Production store at <c>%APPDATA%\Captr\settings.json</c>.</summary>
+    /// <summary>Production store at <c>%LOCALAPPDATA%\Captr\settings.json</c>.</summary>
     public SettingsStore()
         : this(DefaultSettingsPath(), SettingsMigrator.Default)
     {
@@ -64,10 +77,18 @@ public sealed class SettingsStore
     /// </summary>
     public CaptrSettings Load()
     {
+        AdoptSettingsLeftInRoamingByAnOlderCaptr();
+
         string? json = AtomicFile.ReadOrNull(_settingsPath);
+
+        // The file is gone. Before falling back to defaults — which silently discards
+        // the user's working folder, destinations, and hotkeys — look for the previous
+        // version kept beside it. Settings should not be recoverable only from a
+        // backup somebody remembered to take.
         if (json is null)
         {
-            return CaptrSettings.CreateDefault();
+            return RecoverFromPreviousVersion("the settings file was missing")
+                ?? CaptrSettings.CreateDefault();
         }
 
         JsonObject document;
@@ -78,14 +99,97 @@ public sealed class SettingsStore
         }
         catch (JsonException)
         {
+            // Keep the unreadable file for inspection, then try the previous version
+            // for the same reason as above.
             File.Copy(_settingsPath, _settingsPath + ".corrupt", overwrite: true);
-            return CaptrSettings.CreateDefault();
+            return RecoverFromPreviousVersion("the settings file could not be parsed")
+                ?? CaptrSettings.CreateDefault();
         }
 
         document = _migrator.MigrateToCurrent(document);
 
         CaptrSettings? settings = document.Deserialize<CaptrSettings>(SerializerOptions);
         return settings ?? CaptrSettings.CreateDefault();
+    }
+
+    /// <summary>
+    /// Earlier versions of Captr kept settings in ROAMING application data. If one of
+    /// those files is still there and this location has none, move it across so an
+    /// upgrade keeps the user's configuration instead of silently reverting to
+    /// defaults. Runs once in practice: after the move there is nothing left to find.
+    /// </summary>
+    /// <summary>
+    /// Restores settings from the previous version kept beside the file, writing it
+    /// back into place so the recovery is permanent rather than repeated on every
+    /// load. Returns null when there is nothing usable to recover from.
+    /// </summary>
+    private CaptrSettings? RecoverFromPreviousVersion(string reason)
+    {
+        string? backup = AtomicFile.ReadPreviousVersionOrNull(_settingsPath);
+        if (backup is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            CaptrSettings? recovered = JsonNode.Parse(backup) is JsonObject document
+                ? _migrator.MigrateToCurrent(document).Deserialize<CaptrSettings>(SerializerOptions)
+                : null;
+
+            if (recovered is null)
+            {
+                return null;
+            }
+
+            AtomicFile.Write(_settingsPath, backup);
+            RecoveredFromPreviousVersion = reason;
+            return recovered;
+        }
+        catch (Exception exception) when (exception is JsonException or IOException or NotSupportedException)
+        {
+            // A backup that will not load is no better than no backup; defaults are
+            // valid and safe, and the .bak file stays on disk either way.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Set when <see cref="Load"/> had to fall back to the previous version, saying
+    /// why. Null on a normal load. Surfaced by diagnostics so the user finds out that
+    /// something went wrong with their settings rather than silently getting them back.
+    /// </summary>
+    public string? RecoveredFromPreviousVersion { get; private set; }
+
+    private void AdoptSettingsLeftInRoamingByAnOlderCaptr()
+    {
+        // Only ever touches the production location. A test store points somewhere
+        // else entirely and must not inherit whatever this machine happens to have.
+        if (!string.Equals(_settingsPath, DefaultSettingsPath(), StringComparison.OrdinalIgnoreCase)
+            || File.Exists(_settingsPath))
+        {
+            return;
+        }
+
+        string legacyPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "Captr", "settings.json");
+
+        if (!File.Exists(legacyPath))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
+            File.Move(legacyPath, _settingsPath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Losing the old file is not worth failing a start over; the user simply
+            // gets defaults, which are valid and safe.
+        }
     }
 
     /// <summary>Validates and saves. Throws <see cref="SettingsValidationException"/>
@@ -99,7 +203,14 @@ public sealed class SettingsStore
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(_settingsPath)!);
-        AtomicFile.Write(_settingsPath, JsonSerializer.Serialize(settings, SerializerOptions));
+        // keepPreviousVersion: the version being replaced is kept as
+        // settings.json.bak, at the cost of one rename inside the same atomic
+        // operation. Settings are small, they change rarely, and losing them costs a
+        // user their working folder, destinations, and hotkeys — a free previous
+        // version is worth having. The heartbeat, rewritten every second, does NOT
+        // ask for one.
+        AtomicFile.Write(
+            _settingsPath, JsonSerializer.Serialize(settings, SerializerOptions), keepPreviousVersion: true);
     }
 
     /// <summary>
@@ -136,9 +247,25 @@ public sealed class SettingsStore
         return errors.Count > 0 ? throw new SettingsValidationException(errors) : settings;
     }
 
-    private static string DefaultSettingsPath() =>
+    /// <summary>
+    /// Where settings live: <c>%LOCALAPPDATA%\Captr\settings.json</c>, beside the
+    /// recordings, logs, transfer queue, and encoder cache.
+    /// </summary>
+    /// <remarks>
+    /// SPEC §8 asks for ROAMING application data. Captr deliberately uses local
+    /// instead, because most of what these settings contain is bound to this machine
+    /// and roaming it is at best useless and at worst confusing: display selections
+    /// are EDID identities of physical monitors, the working folder and folder
+    /// destinations are absolute paths, and the credential a SharePoint destination
+    /// names is DPAPI-bound to this user AND machine, so it cannot follow the file
+    /// anyway. Keeping every piece of Captr's state in one place also means a support
+    /// bundle, a backup, or a clean-up is one folder rather than two.
+    /// Settings export/import remains the supported way to move a configuration
+    /// between machines, where the user chooses what applies.
+    /// </remarks>
+    public static string DefaultSettingsPath() =>
         Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Captr", "settings.json");
 }
 

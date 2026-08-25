@@ -22,6 +22,14 @@ DISPLAYCONFIG_TARGET_DEVICE_NAME
 // --- Per-monitor DPI ---
 GetDpiForMonitor
 
+// --- True pixel size of a display, independent of this process's DPI awareness.
+// DXGI's DesktopCoordinates are virtual-desktop coordinates, which Windows SCALES
+// for a process that is not per-monitor DPI aware; EnumDisplaySettings reports the
+// mode the hardware is actually in. See DisplayEnumerator.PhysicalSize.
+EnumDisplaySettings
+DEVMODEW
+ENUM_DISPLAY_SETTINGS_MODE
+
 // --- Message-only window for system events (SPEC §6 table) ---
 CreateWindowEx
 DestroyWindow
@@ -60,8 +68,11 @@ RegisterHotKey
 UnregisterHotKey
 
 // --- Credential storage (SPEC §7) ---
+// CredEnumerate is here so Diagnostics can report Captr entries that no destination
+// points at any more. It reads NAMES only; nothing enumerates secret material.
 CredRead
 CredWrite
 CredDelete
+CredEnumerate
 CredFree
 CREDENTIALW

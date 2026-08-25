@@ -91,7 +91,15 @@ try {
     $lines += ''
     $lines += '| Component | Build | Licence |'
     $lines += '|---|---|---|'
-    $lines += "| FFmpeg (child process, unmodified) | $($ffLock.buildId) | LGPL-2.1-or-later |"
+    # The licence follows the pinned flavor. GPL is a recorded decision for
+    # internal-only deployment (docs/developer-guide/design-decisions.md); the
+    # obligations and the exit path are in docs/ffmpeg-source-offer.md.
+    $ffLicence = if ($ffLock.PSObject.Properties['licenceFlavor'] -and $ffLock.licenceFlavor -eq 'gpl') {
+        'GPL-3.0 (internal deployment only — see docs/ffmpeg-source-offer.md)'
+    } else {
+        'LGPL-2.1-or-later'
+    }
+    $lines += "| FFmpeg (child process, unmodified) | $($ffLock.buildId) | $ffLicence |"
     $lines += ''
     $lines += 'FFmpeg licence texts ship alongside the binary; the written source offer is in docs/ffmpeg-source-offer.md.'
 

@@ -1,9 +1,20 @@
 # Bundled FFmpeg: licence obligations and source offer
 
 Captr bundles FFmpeg as a **separate child process** — it is never linked into the
-application. The bundled build is an **LGPL** build (no libx264/libx265, verified
-mechanically at fetch time), which keeps redistribution obligations simple and
-GPL out of the installer entirely (SPEC §2).
+application. The bundled build is currently the **GPL** build (it includes
+libx264, verified mechanically at fetch time). That is a deliberate, recorded
+decision for an **internal-only deployment**: the GPL's obligations attach on
+distribution ("conveying"), and copies made for use within the organisation are
+not conveyed, so no obligation activates in normal use. The trade is worth it
+because libx264's true constant-quality mode makes the software fallback behave
+like the GPU encoders instead of a fixed bitrate.
+
+**If this software is ever distributed outside the organisation**, either
+(a) honour the GPL for the bundled FFmpeg — the source offer below already does
+this, and the arms-length process boundary keeps Captr's own code out of scope —
+or (b) repoint `build/ffmpeg.lock.json` at the `-lgpl` asset of the same release
+tag; the encoder catalog reads what the shipped binary contains and degrades to
+libopenh264 with no code change. (See `docs/developer-guide/design-decisions.md`.)
 
 ## Exact build shipped
 
@@ -23,8 +34,9 @@ endpoint-protection detection).
 
 ## Written offer of corresponding source
 
-FFmpeg is licensed under the GNU Lesser General Public License v2.1 or later.
-The licence texts ship in `<install dir>\ffmpeg\licenses\`.
+The bundled build is licensed under the GNU General Public License v3 (the GPL
+build of FFmpeg incorporates libx264, which is GPL). The licence texts ship in
+`<install dir>\ffmpeg\licenses\`.
 
 The complete corresponding source code for the exact bundled build is publicly
 available from the upstream build project at:

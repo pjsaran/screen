@@ -8,7 +8,7 @@ namespace Captr.Core.Sessions;
 /// On every host start, finds sessions that were never finalised — a journal with no
 /// <c>SessionFinalized</c> event — and runs the finalisation pipeline on each,
 /// automatically and without prompting (SPEC §6). Owns the scan and the recovery
-/// report; if it misses a session, footage sits unfinalised and undelivered forever.
+/// report; if it misses a session, footage sits unfinalised and untransferred forever.
 /// </summary>
 public sealed class RecoveryScanner
 {

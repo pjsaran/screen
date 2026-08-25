@@ -31,12 +31,36 @@ public sealed record RecordingPlan
     /// mid-session (see <c>Sessions/JournalEvent.cs</c>). Part of segment names so
     /// finalisation can group segments without probing them.</summary>
     public int ArrangementGroup { get; init; } = 1;
+
+    /// <summary>How the screen is read. Chosen by encoder selection, exactly like the
+    /// encoder itself: Desktop Duplication when it works, GDI when it does not.</summary>
+    public CaptureMethod CaptureMethod { get; init; } = CaptureMethod.DesktopDuplication;
 }
 
-/// <summary>One display as the encoder sees it: which DXGI output to duplicate and
-/// its native size. The output index is resolved from stable display identity at
-/// start time and NEVER persisted (SPEC §5 — indices reorder).</summary>
-public sealed record CaptureSource(int OutputIndex, int Width, int Height);
+/// <summary>
+/// The two ways Captr can read the screen. This exists because "which encoder works"
+/// turned out not to be the only machine-dependent question — on virtual desktops
+/// (AWS WorkSpaces, some VMs, some RDP hosts) the display driver cannot create the
+/// D3D11 device Desktop Duplication needs, and capture fails before any encoder is
+/// even exercised.
+/// </summary>
+public enum CaptureMethod
+{
+    /// <summary>The <c>ddagrab</c> filter: the Desktop Duplication API, GPU-side and
+    /// cheap. The default, and the right answer on any physical machine.</summary>
+    DesktopDuplication,
+
+    /// <summary>The <c>gdigrab</c> input device: plain GDI screen reads. Works on
+    /// virtual display drivers where Desktop Duplication cannot, at a real CPU cost —
+    /// the compatibility fallback, never the first choice.</summary>
+    Gdi,
+}
+
+/// <summary>One display as the encoder sees it: which DXGI output to duplicate, its
+/// native size, and where it sits on the virtual desktop (what GDI capture addresses
+/// instead of an output index). The output index is resolved from stable display
+/// identity at start time and NEVER persisted (SPEC §5 — indices reorder).</summary>
+public sealed record CaptureSource(int OutputIndex, int Width, int Height, int VirtualX = 0, int VirtualY = 0);
 
 /// <summary>The encoder codec plus its fully-resolved quality argument pairs
 /// (e.g. <c>-rc constqp -qp 23 -preset p5</c>), produced by encoder selection.</summary>

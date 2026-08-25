@@ -61,13 +61,13 @@ Check 'command line is on PATH' {
     if (-not $found) { throw 'captr.exe not resolvable from PATH (open a NEW shell after install — PATH changes need one)' }
 }
 
-# --- End-to-end: short recording delivered to a temp folder destination ----------
+# --- End-to-end: short recording transferred to a temp folder destination ----------
 $stage = Join-Path $env:TEMP ("captr-verify-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 $work = Join-Path $stage 'work'
 $dest = Join-Path $stage 'dest'
 New-Item -ItemType Directory -Force $work, $dest | Out-Null
 
-Check 'short recording produces a playable, correctly-named, delivered file' {
+Check 'short recording produces a playable, correctly-named, transferred file' {
     # Configure: temp working folder + a folder destination, then record ~15 s.
     & $cli settings set workingFolder $work | Out-Null
     $settingsPath = Join-Path $env:APPDATA 'Captr\settings.json'
@@ -85,7 +85,7 @@ Check 'short recording produces a playable, correctly-named, delivered file' {
     Write-Host "      stop:  [$LASTEXITCODE] $stopOut"
     if ($LASTEXITCODE -ne 0) { throw "stop failed with $LASTEXITCODE" }
 
-    # Wait for finalisation + delivery (poll status until idle, then check dest).
+    # Wait for finalisation + transfer (poll status until idle, then check dest).
     $deadline = (Get-Date).AddMinutes(3)
     do {
         Start-Sleep 3
@@ -96,13 +96,13 @@ Check 'short recording produces a playable, correctly-named, delivered file' {
     $deadline = (Get-Date).AddMinutes(2)
     do { Start-Sleep 3 } until ((Get-ChildItem $dest -Filter *.mkv -ErrorAction SilentlyContinue) -or (Get-Date) -gt $deadline)
 
-    $delivered = Get-ChildItem $dest -Filter *.mkv | Select-Object -First 1
-    if (-not $delivered) { throw "no recording arrived in $dest" }
-    if ($delivered.Name -notmatch [regex]::Escape($env:COMPUTERNAME)) { throw "name '$($delivered.Name)' lacks the {machine} token" }
+    $transferred = Get-ChildItem $dest -Filter *.mkv | Select-Object -First 1
+    if (-not $transferred) { throw "no recording arrived in $dest" }
+    if ($transferred.Name -notmatch [regex]::Escape($env:COMPUTERNAME)) { throw "name '$($transferred.Name)' lacks the {machine} token" }
 
-    $probe = & $ffprobe -v error -show_entries 'stream=width,height : format=duration' -of csv=p=0 $delivered.FullName
-    if ($LASTEXITCODE -ne 0) { throw 'delivered file does not probe' }
-    Write-Host "      delivered: $($delivered.Name)  probe: $($probe -join ' ')"
+    $probe = & $ffprobe -v error -show_entries 'stream=width,height : format=duration' -of csv=p=0 $transferred.FullName
+    if ($LASTEXITCODE -ne 0) { throw 'transferred file does not probe' }
+    Write-Host "      transferred: $($transferred.Name)  probe: $($probe -join ' ')"
 }
 
 if ($failures.Count -gt 0) {

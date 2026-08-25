@@ -59,11 +59,11 @@ public class IpcRoundTripTests : IAsyncLifetime
 
         await using IpcClient? client = await ConnectAsync();
         StartResponse response = await client!.RequestAsync<StartResponse>(
-            IpcKinds.Start, new StartRequest(20, "balanced", "my-label"), TestContext.Current.CancellationToken);
+            IpcKinds.Start, new StartRequest(20, "balanced", "faster", "my-label"), TestContext.Current.CancellationToken);
 
         response.Message.ShouldBe("started");
         await _operations.Received(1).StartAsync(
-            Arg.Is<StartRequest>(r => r.FrameRate == 20 && r.QualityPreset == "balanced" && r.Label == "my-label"),
+            Arg.Is<StartRequest>(r => r.FrameRate == 20 && r.Quality == "balanced" && r.SpeedPreset == "faster" && r.Label == "my-label"),
             Arg.Any<CancellationToken>());
     }
 

@@ -29,12 +29,20 @@ public static class FfmpegArgumentBuilder
             "-hide_banner",
             "-nostats",
             "-loglevel", "warning",
+        };
 
+        // GDI capture arrives as real inputs, which must be declared before the
+        // filter graph that consumes them. Desktop Duplication contributes nothing
+        // here — ddagrab is a source filter inside the graph itself.
+        arguments.AddRange(FilterGraphBuilder.BuildInputArguments(plan));
+
+        arguments.AddRange(
+        [
             "-filter_complex", FilterGraphBuilder.Build(plan, arrangement),
             "-map", "[v]",
 
             "-c:v", plan.Encoder.CodecName,
-        };
+        ]);
 
         arguments.AddRange(plan.Encoder.QualityArguments);
 

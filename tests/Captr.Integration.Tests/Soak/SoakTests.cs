@@ -43,7 +43,7 @@ public class SoakTests : IDisposable
         CaptrSettings settings = CaptrSettings.CreateDefault() with { WorkingFolder = _root, FrameRate = 10 };
         (RecordingSession.SessionContext context, SessionStarted startEvent) =
             await new SessionPlanner(Logger.None).PlanAsync(
-                settings, null, null, "soak", TestContext.Current.CancellationToken);
+                settings, null, null, null, "soak", TestContext.Current.CancellationToken);
 
         RecordingSession session = RecordingSession.Create(context, startEvent, Logger.None);
 

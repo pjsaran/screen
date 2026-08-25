@@ -1,0 +1,102 @@
+<Page
+    x:Class="Captr.App.Views.HelpPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:theme="clr-namespace:Captr.App.Theme"
+    xmlns:views="clr-namespace:Captr.App.Views"
+    Title="Help">
+    <Grid Margin="{StaticResource PagePadding}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <views:PageHeader Grid.Row="0" Title="Help" />
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+
+                <!-- ==== Naming tokens ==========================================
+                     THE reference for tokens. The fields that accept them carry
+                     only a one-line pointer here, so the forms stay small and this
+                     table can afford to be complete. Rows come from code-behind,
+                     built from OutputNamer.SupportedTokens — the page can never
+                     list a token the recorder does not accept, or miss one it
+                     does. -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Naming tokens" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="Put these in a file naming pattern or in a destination's folder path. Each one is replaced when the recording finishes." />
+
+                        <Border BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1" CornerRadius="6" SnapsToDevicePixels="True">
+                            <StackPanel>
+                                <Border Style="{StaticResource TableHeader}" CornerRadius="5,5,0,0" Padding="10,6">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="1.2*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" theme:Typo.Text="Token" Style="{StaticResource MicroLabel}" />
+                                        <TextBlock Grid.Column="1" theme:Typo.Text="Becomes" Style="{StaticResource MicroLabel}" />
+                                        <TextBlock Grid.Column="2" theme:Typo.Text="Example" Style="{StaticResource MicroLabel}" />
+                                    </Grid>
+                                </Border>
+
+                                <ItemsControl x:Name="TokenList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Style="{StaticResource TableRow}" Padding="10,6">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="110" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="1.2*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" Text="{Binding Token}"
+                                                               Style="{StaticResource MonoText}"
+                                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                               VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding Meaning}"
+                                                               Style="{StaticResource CaptionText}"
+                                                               VerticalAlignment="Center" Margin="0,0,10,0" />
+                                                    <TextBlock Grid.Column="2" Text="{Binding Example}"
+                                                               Style="{StaticResource MonoText}"
+                                                               VerticalAlignment="Center" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== Date and time formats ================================== -->
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="Date and time formats" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
+                        <TextBlock Style="{StaticResource SectionHint}"
+                                   Text="{}{date}, {start} and {end} accept a format after a colon, using the usual date letters (yyyy year, MM month, dd day, HH hour, mm minute)." />
+                        <TextBlock x:Name="FormatExamples" Style="{StaticResource MonoText}"
+                                   TextTrimming="None" TextWrapping="Wrap" />
+                        <TextBlock Style="{StaticResource CaptionText}" Margin="0,8,0,0"
+                                   Text="Tokens work in folder paths too: a destination folder ending in {date:yyyy-MM} files each recording into that month's folder, created automatically." />
+                    </StackPanel>
+                </Border>
+
+                <!-- ==== When something goes wrong ============================== -->
+                <Border Style="{StaticResource Card}" Margin="0">
+                    <StackPanel>
+                        <TextBlock theme:Typo.Text="When something goes wrong" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
+                        <TextBlock Style="{StaticResource BodyText}"
+                                   Text="Open the Diagnostics page first — every check that finds a problem also says what to do about it. If you need help from someone else, the Export support bundle button there collects the logs and session records into one zip. It contains no video and no secrets." />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

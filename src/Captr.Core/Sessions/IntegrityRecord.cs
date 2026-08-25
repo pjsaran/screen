@@ -56,6 +56,52 @@ public sealed record IntegrityRecord
     }
 
     /// <summary>
+    /// Records that a finalised output has been RENAMED on disk, rewriting the record
+    /// in place. A rename changes no bytes, so the size and hash carry over untouched.
+    /// </summary>
+    /// <remarks>
+    /// This exists because finalisation and naming are two steps: the pipeline joins
+    /// segments into <c>joined-gNN.mkv</c> and hashes that, and the host then renames
+    /// it to the user's chosen pattern. Without this call the record still points at
+    /// the intermediate name, and <see cref="VerifyAsync"/> reports every finalised
+    /// recording as "missing" — which is exactly the bug this method was added to fix.
+    /// </remarks>
+    /// <param name="workingFolder">The session folder holding the record.</param>
+    /// <param name="oldFileName">The name the record currently carries.</param>
+    /// <param name="newFileName">The name the file now has on disk.</param>
+    /// <returns>True when a matching output was found and the record rewritten.</returns>
+    public static bool RecordOutputRename(string workingFolder, string oldFileName, string newFileName)
+    {
+        if (ReadOrNull(workingFolder) is not { } record)
+        {
+            return false;
+        }
+
+        bool renamed = false;
+        var outputs = new List<HashedFile>(record.Outputs.Count);
+        foreach (HashedFile output in record.Outputs)
+        {
+            if (!renamed && string.Equals(output.FileName, oldFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                outputs.Add(output with { FileName = newFileName });
+                renamed = true;
+            }
+            else
+            {
+                outputs.Add(output);
+            }
+        }
+
+        if (!renamed)
+        {
+            return false;
+        }
+
+        (record with { Outputs = outputs }).Write(workingFolder);
+        return true;
+    }
+
+    /// <summary>
     /// The verification pass: recomputes every hash on disk and compares. Any
     /// mismatch, missing file, or size change is reported — proving (or disproving)
     /// that nothing was altered since finalisation (SPEC §6).

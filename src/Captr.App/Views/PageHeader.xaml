@@ -1,0 +1,23 @@
+<UserControl
+    x:Class="Captr.App.Views.PageHeader"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Name="Root">
+    <!--
+        The top of every page: the page's name on the left, its page-level actions on
+        the right. One control so all five pages are laid out identically instead of
+        each hand-rolling a header that ends up a few pixels different from the last.
+
+        It is deliberately OUTSIDE any ScrollViewer on every page, so the title and
+        the actions stay put while the content scrolls under them.
+    -->
+    <Grid Margin="0,0,0,12">
+        <TextBlock Text="{Binding Title, ElementName=Root}"
+                   Style="{StaticResource PageTitleText}"
+                   VerticalAlignment="Center" />
+
+        <ContentPresenter Content="{Binding Actions, ElementName=Root}"
+                          HorizontalAlignment="Right"
+                          VerticalAlignment="Center" />
+    </Grid>
+</UserControl>

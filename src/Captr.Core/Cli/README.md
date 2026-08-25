@@ -20,3 +20,7 @@ Design rules from SPEC §10, encoded here:
   folder directly — they need no host at all.
 - Secrets are NEVER accepted as arguments (visible to every process on the
   machine, SPEC §7); credential provisioning reads stdin or prompts masked.
+- `doctor` renders `Captr.Core.Diagnostics.HealthReport` — the SAME checks the
+  Diagnostics page shows, so the window and the terminal can never disagree about
+  whether a machine is healthy. It exits `1` on a Problem-level finding, which is
+  what makes it usable in a deployment check.

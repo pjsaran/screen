@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Fetches the pinned LGPL FFmpeg build into tools/ffmpeg and verifies it.
+    Fetches the pinned FFmpeg build into tools/ffmpeg and verifies it.
 
 .DESCRIPTION
     Reads build/ffmpeg.lock.json (the single source of truth for which FFmpeg we ship),
@@ -12,9 +12,10 @@
         sometimes omit it, and without it Captr cannot capture at all (SPEC §11:
         "confirm the build actually contains the required capture filter").
       * every hardware encoder we probe for at runtime.
-      * whether libopenh264 is present — this decides the software-encoder fallback
-        (SPEC §2: LGPL builds lack libx264; openh264 is the preferred fallback if
-        compiled in). The answer is recorded, not assumed.
+      * which software encoders are present (libx264 in the GPL build, libopenh264
+        in both flavors) — this decides the software-encoder fallback tier. The
+        answer is recorded, not assumed, so the runtime catalog only ever offers
+        what the shipped binary actually contains.
 
     Results land in tools/ffmpeg/capabilities.json, which the application build embeds
     and the release record references (exact upstream build identifier, SPEC §2).
@@ -119,12 +120,25 @@ if ($missing.Count -gt 0) {
            "ddagrab cannot capture the desktop at all (SPEC §1: DXGI Desktop Duplication, never GDI).")
 }
 
-# GPL safety check: an LGPL build must NOT contain libx264/libx265 (their presence
-# would mean we pinned a GPL build by mistake, recreating the licence problem).
-foreach ($gpl in @('libx264', 'libx265')) {
-    if ($encoders -match "\b$gpl\b") {
-        throw "Encoder '$gpl' found — this is a GPL build, not LGPL. Fix build/ffmpeg.lock.json."
+# Licence-flavor consistency check. The lock file states which flavor is intended
+# (a DECISION recorded in docs/developer-guide/design-decisions.md, currently GPL
+# for internal-only deployment); the binary must match it, so a copy-paste of the
+# wrong asset line can never silently change the product's licence posture.
+#   lgpl → libx264/libx265 must be ABSENT (their presence means a GPL build).
+#   gpl  → libx264 must be PRESENT (it is the reason the GPL build was chosen).
+$flavor = if ($lock.PSObject.Properties['licenceFlavor']) { $lock.licenceFlavor } else { 'lgpl' }
+if ($flavor -eq 'lgpl') {
+    foreach ($gpl in @('libx264', 'libx265')) {
+        if ($encoders -match "\b$gpl\b") {
+            throw "Encoder '$gpl' found — this is a GPL build, but the lock says lgpl. Fix build/ffmpeg.lock.json."
+        }
     }
+} elseif ($flavor -eq 'gpl') {
+    if ($encoders -notmatch '\blibx264\b') {
+        throw "The lock says gpl but the build has no libx264 — the wrong asset is pinned. Fix build/ffmpeg.lock.json."
+    }
+} else {
+    throw "Unknown licenceFlavor '$flavor' in build/ffmpeg.lock.json — use 'gpl' or 'lgpl'."
 }
 
 $optionalPresent = @{}

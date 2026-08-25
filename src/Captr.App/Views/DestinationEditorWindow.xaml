@@ -1,0 +1,159 @@
+<ui:FluentWindow
+    x:Class="Captr.App.Views.DestinationEditorWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:theme="clr-namespace:Captr.App.Theme"
+    Title="Destination"
+    Width="720" SizeToContent="Height"
+    MinHeight="320"
+    ResizeMode="NoResize"
+    WindowStartupLocation="CenterOwner"
+    Icon="pack://application:,,,/Assets/captr.ico"
+    WindowBackdropType="Mica"
+    ExtendsContentIntoTitleBar="True"
+    WindowCornerPreference="Round">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- A modal dialog has no business being minimised or maximised; only close. -->
+        <ui:TitleBar Grid.Row="0" Title="Destination" ShowMinimize="False" ShowMaximize="False" />
+
+        <!-- The fields scroll if they must. The form is laid out in TWO columns so a
+             SharePoint destination — nine fields — fits a 1080p screen without
+             scrolling at all; on very small screens MaxHeight (set from the work area
+             in the constructor) lets this region scroll while the buttons below stay
+             reachable. -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="20,4,20,12">
+            <TextBlock Text="Where should finished recordings go?" Style="{StaticResource SectionTitle}" />
+            <TextBlock Style="{StaticResource SectionHint}"
+                       Text="Each destination transfers on its own — one failing never holds up another." />
+
+            <!-- ==== Kind and name, side by side =============================== -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                    <TextBlock theme:Typo.Text="Kind" Style="{StaticResource FieldLabel}" />
+                    <ComboBox x:Name="KindBox" DisplayMemberPath="Label" SelectionChanged="OnKindChanged" />
+                    <TextBlock x:Name="KindHint" Style="{StaticResource FieldHint}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                    <TextBlock theme:Typo.Text="Name" Style="{StaticResource FieldLabel}" />
+                    <ui:TextBox x:Name="NameBox" PlaceholderText="Archive share" />
+                    <TextBlock Style="{StaticResource FieldHint}"
+                               Text="Your label for it, shown on the Transfers page." />
+                </StackPanel>
+            </Grid>
+
+            <!-- ==== Folder fields ============================================= -->
+            <StackPanel x:Name="FolderFields">
+                <TextBlock theme:Typo.Text="Folder" Style="{StaticResource FieldLabel}" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:TextBox x:Name="FolderBox" Grid.Column="0"
+                                PlaceholderText="D:\Recordings or \\server\share\recordings\{date:yyyy-MM}" />
+                    <ui:Button Style="{StaticResource ActionButton}" Grid.Column="1" Content="Browse…" Margin="6,0,0,0"
+                               Click="OnBrowseClicked" />
+                </Grid>
+                <TextBlock Style="{StaticResource FieldHint}"
+                           Text="A local folder, mapped drive, or \\server\share. Tokens like {date:yyyy-MM} work here — see Help." />
+            </StackPanel>
+
+            <!-- ==== SharePoint fields ========================================= -->
+            <StackPanel x:Name="SharePointFields" Visibility="Collapsed">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Left column: where the recordings go. -->
+                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                        <TextBlock theme:Typo.Text="Site URL" Style="{StaticResource FieldLabel}" />
+                        <ui:TextBox x:Name="SiteBox" PlaceholderText="https://contoso.sharepoint.com/sites/Recordings" />
+                        <TextBlock Style="{StaticResource FieldHint}"
+                                   Text="The SharePoint site the library belongs to." />
+
+                        <TextBlock theme:Typo.Text="Drive ID" Style="{StaticResource FieldLabel}" />
+                        <ui:TextBox x:Name="DriveIdBox" PlaceholderText="b!x2Fh…" />
+                        <TextBlock Style="{StaticResource FieldHint}"
+                                   Text="The document library's id, from GET /sites/{site-id}/drives. Test connection checks it." />
+
+                        <TextBlock theme:Typo.Text="Folder in the library" Style="{StaticResource FieldLabel}" />
+                        <ui:TextBox x:Name="SharePointFolderBox" PlaceholderText="Shared Documents/Captr/{date:yyyy-MM}" />
+                        <TextBlock Style="{StaticResource FieldHint}"
+                                   Text="Where uploads land. Tokens work here too — see Help." />
+                    </StackPanel>
+
+                    <!-- Right column: how Captr signs in. -->
+                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                        <TextBlock theme:Typo.Text="Tenant ID" Style="{StaticResource FieldLabel}" />
+                        <ui:TextBox x:Name="TenantBox" />
+                        <TextBlock Style="{StaticResource FieldHint}"
+                                   Text="Directory (tenant) ID from the app registration." />
+
+                        <TextBlock theme:Typo.Text="Client ID" Style="{StaticResource FieldLabel}" />
+                        <ui:TextBox x:Name="ClientBox" />
+                        <TextBlock Style="{StaticResource FieldHint}"
+                                   Text="Application (client) ID from the app registration." />
+
+                        <TextBlock theme:Typo.Text="Client secret" Style="{StaticResource FieldLabel}" />
+                        <PasswordBox x:Name="SecretBox" PasswordChanged="OnSecretChanged" />
+                        <TextBlock x:Name="SecretStatus" Style="{StaticResource FieldHint}" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+
+            <!-- ==== Not-yet-built kinds ====================================== -->
+            <Border x:Name="ComingSoonNotice" Style="{StaticResource Card}" Visibility="Collapsed" Margin="0,0,0,10">
+                <TextBlock x:Name="ComingSoonText" Style="{StaticResource WarningText}" />
+            </Border>
+
+            <TextBlock theme:Typo.Text="File name at this destination" Style="{StaticResource FieldLabel}" />
+            <ui:TextBox x:Name="PatternBox" PlaceholderText="Leave empty to keep the recording's own name" />
+            <TextBlock Style="{StaticResource FieldHint}"
+                       Text="Only needed when this place wants its own naming. The Help page lists the tokens." />
+
+            <CheckBox x:Name="EnabledBox" IsChecked="True"
+                      Content="Transfer to this destination when a recording finishes" />
+
+            <!-- Test-connection outcome: green for proof, red for a fix to make. -->
+            <TextBlock x:Name="TestResultText" Style="{StaticResource SuccessText}" Margin="0,8,0,0"
+                       Visibility="Collapsed" />
+            <TextBlock x:Name="ErrorText" Style="{StaticResource ErrorText}" Margin="0,8,0,0"
+                       Visibility="Collapsed" />
+        </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Padding="20,12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Only meaningful for SharePoint, so only shown there. -->
+                <ui:Button Style="{StaticResource ActionButton}" Grid.Column="0" x:Name="TestButton"
+                           Content="Test connection" Visibility="Collapsed" Click="OnTestConnectionClicked" />
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <ui:Button Style="{StaticResource ActionButton}" Content="Cancel" IsCancel="True" Click="OnCancelClicked" />
+                    <ui:Button Style="{StaticResource ActionButton}" x:Name="SaveButton" Content="Save destination" Appearance="Primary" Margin="6,0,0,0"
+                               IsDefault="True" Click="OnSaveClicked" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</ui:FluentWindow>
