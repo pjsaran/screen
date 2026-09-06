@@ -97,6 +97,6 @@
 
 | Component | Build | Licence |
 |---|---|---|
-| FFmpeg (child process, unmodified) | ffmpeg-n8.1.2-44-g7c533d0f86-win64-gpl | GPL-3.0 (internal deployment only — see docs/ffmpeg-source-offer.md) |
+| FFmpeg (child process, unmodified) | ffmpeg-n8.1.2-50-g1a748fe2cd-win64-gpl | GPL-3.0 (internal deployment only — see docs/ffmpeg-source-offer.md) |
 
 FFmpeg licence texts ship alongside the binary; the written source offer is in docs/ffmpeg-source-offer.md.

@@ -68,7 +68,25 @@ if (Test-Path $archivePath) {
 if ($needDownload) {
     $url = "https://github.com/$($lock.repository)/releases/download/$($lock.releaseTag)/$($lock.assetName)"
     Write-Host "Downloading $url"
-    Invoke-WebRequest -Uri $url -OutFile $archivePath -UseBasicParsing
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $archivePath -UseBasicParsing
+    } catch {
+        # A 404 here almost always means the pinned release was PRUNED upstream, not a
+        # typo. BtbN/FFmpeg-Builds keeps daily autobuilds for ~2 weeks and then deletes
+        # them, retaining only the last build of each month. The developer who pinned a
+        # mid-month tag never notices (their zip is cached in tools/ffmpeg); everyone
+        # else, and CI, gets this error. Say so plainly instead of leaving a bare 404.
+        $status = $null
+        try { $status = [int]$_.Exception.Response.StatusCode } catch { }
+        if ($status -eq 404) {
+            throw ("FFmpeg download returned 404 Not Found:`n  $url`n" +
+                   "The pinned release '$($lock.releaseTag)' no longer exists upstream. " +
+                   "BtbN/FFmpeg-Builds deletes daily autobuilds after ~2 weeks and keeps only " +
+                   "month-end ones. Re-pin build/ffmpeg.lock.json to a MONTH-END tag " +
+                   "(see docs/developer-guide/upgrading-ffmpeg.md).")
+        }
+        throw
+    }
 }
 
 # --- 2. Verify checksum (hard gate) ----------------------------------------------

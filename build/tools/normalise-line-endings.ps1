@@ -40,8 +40,17 @@ Get-ChildItem -Path $Root -Recurse -File |
         $offset = if ($hasBom) { 3 } else { 0 }
         $text = [System.Text.Encoding]::UTF8.GetString($bytes, $offset, $bytes.Length - $offset)
 
-        # Normalise to LF first so mixed endings collapse, then to CRLF.
-        $normalised = $text -replace "`r`n", "`n" -replace "`r", "`n" -replace "`n", "`r`n"
+        # Normalise to LF first so mixed endings collapse, then to the wanted ending.
+        #
+        # The wanted ending is CRLF for everything EXCEPT the golden test fixtures
+        # (*.args.txt), which .gitattributes pins to LF: they are compared byte-for-byte
+        # against ffmpeg argument lists, and a fixture written with CRLF on one machine
+        # and LF on another would show up as a spurious "golden file changed" diff.
+        # Keep this rule in step with .gitattributes — that file is the source of truth
+        # for what git will do at commit time; this script only saves the round trip.
+        $wantsLf = $_.Name -like '*.args.txt'
+        $lf = $text -replace "`r`n", "`n" -replace "`r", "`n"
+        $normalised = if ($wantsLf) { $lf } else { $lf -replace "`n", "`r`n" }
 
         $wanted = [System.Text.Encoding]::UTF8.GetBytes($normalised)   # UTF8Encoding here emits no BOM
         if ($hasBom -or -not [System.Linq.Enumerable]::SequenceEqual([byte[]]$bytes, [byte[]]$wanted)) {
