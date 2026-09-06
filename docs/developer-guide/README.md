@@ -28,10 +28,17 @@ For anyone building or changing Captr.
 These are not style preferences. Each one exists because breaking it produces a
 specific, bad outcome.
 
-**Never a Windows Service, and never GDI capture.** A service runs in session 0,
-where Desktop Duplication records black. GDI capture is slow, tears, and misses
-hardware-accelerated content. Both prohibitions are stated in code where someone
-would otherwise be tempted.
+**Never a Windows Service.** A service runs in session 0, where Desktop
+Duplication records black. The prohibition is stated in code where someone would
+otherwise be tempted.
+
+**Desktop Duplication first; GDI only where Desktop Duplication does not exist.**
+GDI capture is slow, tears, and misses hardware-accelerated content, so it is never
+a *preference* and never a mid-session fallback. It is the last rung of the
+start-time capture ladder purely because virtual desktops — AWS WorkSpaces, some
+Citrix and VM hosts — have no Desktop Duplication at all, and there the choice is
+GDI or no recording. Diagnostics says plainly when the compatibility path is in
+use.
 
 **The recording outlives everything watching it.** FFmpeg is deliberately not in a
 job object, its progress goes to a *file* rather than a pipe, and the journal is

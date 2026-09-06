@@ -84,12 +84,67 @@ tail carries each candidate's own error. On a machine with no GPU at all the
 software encoder should still pass — if it does not, the trial's error text is
 what to send with a support bundle.
 
+### The recording stopped on its own, and nobody stopped it
+
+Captr never stops quietly. Whatever ended it was written down, in this order of
+likelihood:
+
+1. **The disk ran low.** Captr stops cleanly with about five minutes of space left,
+   because a clean stop beats a disk-full crash. The footage up to that point is
+   finalised and complete. Look in the session's `journal.ndjson` for a note saying
+   "Disk critically low".
+2. **Windows shut down, restarted, or logged you off.** Captr holds the shutdown
+   until the recording is closed properly, then lets it continue. On an **AWS
+   WorkSpace set to AutoStop**, disconnecting your client eventually stops the whole
+   machine — that looks exactly like this, and the recording will have been finalised
+   on the way down.
+3. **The encoder failed repeatedly.** Only this one loses anything, and only the tail.
+   The journal carries the reason and FFmpeg's own error lines.
+
+A locked screen, a UAC prompt, or a closed remote-desktop window is **not** a reason
+to stop. Capture pauses while the desktop is away and picks up by itself when it
+comes back; the time in between shows as a gap, and the recording keeps running for
+as long as you asked it to.
+
+To see which of the three happened, open the recording's folder (**Recordings → Open
+folder**) and read the last few lines of `journal.ndjson`, or send a support bundle —
+it contains the same answer.
+
+### The screen locked and my recording has a hole in it
+
+Expected, and reported rather than hidden. While the machine is locked, Windows
+shows the secure logon desktop and there is genuinely nothing for Captr to capture.
+Recording keeps running, the locked time is recorded as a gap, and capture resumes
+by itself the moment you unlock.
+
+Captr already stops the machine sleeping and stops the display powering off for the
+whole recording. It does **not** stop the lock. The lock runs off a different timer —
+how long since a real keystroke or mouse move — which nothing Captr can ask Windows
+for affects, and the only way to defeat it is to fake keyboard activity, which
+overrides a security setting your organisation may have deliberately set.
+
+**Diagnostics tells you in advance.** The **Unattended recording** check reads this
+machine's actual settings and says what will happen and after how long, so you find
+out before a three-hour recording rather than after. The same sentence is written
+into the recording's journal when it starts.
+
+To change it: **Settings > Personalisation > Lock screen > Screen saver**. If the
+timeout is set by policy, it is greyed out and only whoever manages the machine can
+change it.
+
+One case is worth knowing about because it is *silent*: a screen saver that does
+**not** lock the machine stays on the ordinary desktop, so capture keeps working
+perfectly and records the screen saver. No gap, no warning — just the screen saver
+instead of your screen. Diagnostics calls this one out separately.
+
 ### Coverage says less than 100%
 
 Something interrupted the capture, and Captr is telling you rather than hiding it.
 The recording's `integrity.json` records exactly where and for how long. Common
-causes: the machine slept, a display was unplugged, the encoder stalled and was
-restarted, or you paused and forgot.
+causes: the machine slept, the screen was locked or the remote session was
+disconnected so there was nothing to capture, a display was unplugged, the encoder
+stalled and was restarted, or you paused and forgot. Each gap in `integrity.json`
+carries its own reason.
 
 Everything outside the gaps is intact. Captr will never present a recording as
 continuous when it is not.

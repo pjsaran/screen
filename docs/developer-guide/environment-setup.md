@@ -32,6 +32,16 @@ FFmpeg (about 80 MB) and asserts its capabilities, runs the licence gate, checks
 formatting, builds with warnings-as-errors, and runs the unit and CI-safe
 integration tests.
 
+`dotnet build` and `dotnet test` also work straight from a clone without running
+`build.ps1` first — the integration test project fetches the pinned FFmpeg itself
+when `tools/ffmpeg` is missing, since `tools/` is deliberately not in git. Set
+`-p:CaptrSkipFfmpegFetch=true` to suppress that.
+
+One trap worth knowing: **do not pass `--nologo` to `dotnet test`.** The test
+projects run on Microsoft.Testing.Platform, which does not accept that flag and
+reports `Zero tests ran` with a non-zero exit instead of an error — a failure that
+looks exactly like a broken repository.
+
 A green run ends with a test summary and no warnings. Anything else is a real
 failure — there are no expected warnings in this build.
 
@@ -93,9 +103,35 @@ surprising diff. Two things it enforces that tools often get wrong:
 - **UTF-8 without a byte-order mark.**
 - **CRLF line endings.**
 
-Anything that edits files in bulk — `sed`, a script, an editor set to LF — can
-break both silently. `build/tools/normalise-line-endings.ps1` puts the whole tree
-back:
+**You do not have to configure git for this.** `.gitattributes` pins the whole tree
+to `text=auto eol=crlf`, so every checkout produces CRLF whatever your local
+`core.autocrlf` happens to be. That file is load-bearing: before it existed, a clone
+on a machine with `core.autocrlf=false` checked out LF and `dotnet format
+--verify-no-changes` reported **23,604 ENDOFLINE errors** — on a tree nobody had
+touched. The developer who hits that has no way to distinguish it from a real
+formatting mistake, so they run `dotnet format` and turn a config gap into a
+whole-repository diff.
+
+The eleven golden argument files under `tests/Captr.Core.Tests/Golden` are pinned to
+LF instead, because the tests regenerate them with `"\n"` and a golden file should
+show a diff only when the arguments actually changed.
+
+### If you cloned before `.gitattributes` landed
+
+An existing working tree keeps whatever line endings it was checked out with. Commit
+or stash anything you care about, then let git rewrite it:
+
+```powershell
+git rm --cached -r .        # forget the working-tree state, keeps files on disk
+git reset --hard            # re-checkout, now applying .gitattributes
+```
+
+`git ls-files --eol` should then report `w/crlf` for everything except the golden
+files and the icons. Re-cloning does the same job.
+
+Anything that edits files in bulk — `sed`, a script, an editor set to LF — can still
+break the encoding or the endings inside a working tree.
+`build/tools/normalise-line-endings.ps1` puts it back:
 
 ```powershell
 pwsh build/tools/normalise-line-endings.ps1

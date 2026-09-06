@@ -2,10 +2,11 @@
 # licence gate, and packaging. Signing is skipped automatically when the signing
 # environment variables are absent (SPEC §11: the build must succeed unsigned).
 #
-# Only CI-safe test categories run here: unit tests plus integration tests that use
-# lavfi synthetic inputs. Tests needing a real desktop (ddagrab), a GPU encoder, or
-# long soak time carry traits Display/Gpu/Soak and run on a real machine via
-# build/build.ps1 -Full.
+# Only CI-safe test categories run here: unit tests, integration tests that use
+# lavfi synthetic inputs, and — after the packaging step — the Published category,
+# which drives the published captr.exe. Tests needing a real desktop (ddagrab), a
+# GPU encoder, or long soak time carry traits Display/Gpu/Soak and run on a real
+# machine via build/build.ps1 -Full.
 name: ci
 
 on:
@@ -53,6 +54,13 @@ jobs:
 
       - name: Package (publish + installer, unsigned unless secrets present)
         run: pwsh build/build.ps1 -Configuration Release -SkipTests -Installer
+
+      # AFTER packaging on purpose: these drive publish/captr.exe, which the
+      # step above is what creates. Running them earlier is what used to fail.
+      - name: CLI contract tests (against the published payload)
+        run: >
+          dotnet test tests/Captr.Integration.Tests --configuration Release --no-build
+          --filter "Category=Published"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

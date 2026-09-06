@@ -147,17 +147,66 @@ public class SupervisorPolicyTests
     }
 
     [Theory]
-    [InlineData("[ddagrab @ 0000] Failed to duplicate output")]
-    [InlineData("DXGI_ERROR_ACCESS_LOST")]
-    [InlineData("[in#0] ACCESS_DENIED acquiring the desktop")]
+    // Desktop Duplication (ddagrab) — the secure desktop owns the screen, or the
+    // duplication could not be handed back after a session switch.
+    [InlineData("[ddagrab @ 0000021f] Desktop duplication access denied")]
+    [InlineData("[ddagrab @ 0000021f] Failed duplicating output: 887a0026")]
+    [InlineData("[ddagrab @ 0000021f] Failed querying IDXGIOutput1")]
+    // GDI (gdigrab) — the capture method used where Desktop Duplication does not
+    // exist, i.e. AWS WorkSpaces. A disconnected or locked session has no desktop
+    // to copy pixels from, so the blit and the device-context calls fail.
+    [InlineData("[gdigrab @ 0000027a] Failed to capture image (error 6)")]
+    [InlineData("[gdigrab @ 0000027a] Couldn't get window device context (error 0)")]
+    [InlineData("[gdigrab @ 0000027a] Couldn't get window rectangle (error 1400)")]
     public void Losing_the_desktop_is_its_own_kind_not_an_encoder_fault(string logLine)
     {
-        // UAC's secure desktop, a session switch, an RDP transition. Counting these
-        // as faults would march a healthy session through the fallback to a loud
-        // stop just because someone left a UAC prompt open (SPEC §6).
+        // UAC's secure desktop, a lock, a remote client disconnecting. Counting
+        // these as faults marches a healthy session through the fallback to a loud
+        // stop just because someone closed their remote-desktop window (SPEC §6).
+        //
+        // Every line above is FFmpeg's REAL wording, taken out of the shipped
+        // binary. CaptureLossSignatureTests keeps them honest; an earlier version of
+        // this test invented three strings FFmpeg never prints, so it passed while
+        // production could not classify a single lost desktop correctly.
         SupervisorPolicy.ClassifyExit(
             stopWasRequested: false, killedForStall: false, exitCode: 1, logTail: [logLine])
             .ShouldBe(ExitKind.CaptureAccessLost);
+    }
+
+    [Fact]
+    public void A_gdigrab_capture_loss_survives_the_generic_error_test_that_would_call_it_a_fault()
+    {
+        // The trap: gdigrab writes "(error 6)" into its message, so the generic
+        // "does the log mention an error" heuristic matches it too. Capture loss
+        // must be decided FIRST, or the machines that use gdigrab — the ones with no
+        // hardware encoder and therefore no fallback left — stop after three
+        // disconnects.
+        SupervisorPolicy.ClassifyExit(
+            stopWasRequested: false, killedForStall: false, exitCode: 1,
+            logTail:
+            [
+                "[gdigrab @ 0000027a] Failed to capture image (error 6)",
+                "[out#0/matroska] Error muxing a packet",
+                "Conversion failed!",
+            ])
+            .ShouldBe(ExitKind.CaptureAccessLost);
+    }
+
+    [Fact]
+    public void Repeated_capture_losses_never_push_the_session_toward_the_fallback()
+    {
+        // The whole point: a desktop that keeps coming and going costs gaps, never
+        // the session. A different encoder cannot conjure a desktop (SPEC §6).
+        var policy = new SupervisorPolicy();
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            SupervisorPolicy.ClassifyExit(
+                stopWasRequested: false, killedForStall: false, exitCode: 1,
+                logTail: ["[gdigrab @ 0000027a] Failed to capture image (error 6)"])
+                .ShouldBe(ExitKind.CaptureAccessLost);
+        }
+
+        policy.HasFallenBack.ShouldBeFalse("capture losses are never faults, so nothing counts down");
     }
 
     [Fact]

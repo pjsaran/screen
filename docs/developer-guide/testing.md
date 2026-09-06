@@ -32,9 +32,18 @@ Categorised by trait, because most of them cannot run on a hosted CI runner:
 |---|---|---|
 | `Ffmpeg` | The bundled FFmpeg, driven with synthetic `lavfi` inputs | yes |
 | `Chaos` | The same, plus randomised kills and deliberate corruption | yes |
+| `Published` | `publish/captr.exe`, so it runs only AFTER a publish — see the note below | yes, after packaging |
 | `Display` | A real interactive desktop (`ddagrab` capture) | no |
 | `Gpu` | A real hardware encoder | no |
 | `Soak` | Both, plus patience. `CAPTR_SOAK_MINUTES` sets the length (default 6) | no |
+
+A category is a promise about what a test **needs**, and needs are not only
+hardware. `Published` exists because the CLI contract tests drive the published
+`captr.exe`, which no amount of `dotnet build` produces. They were once `Ffmpeg` —
+right that they need no GPU, wrong that they could run before packaging — and so
+they passed only on machines carrying a stale `publish/` from an earlier run, while
+failing on every clean clone. If a test needs an artefact from a later build stage,
+give it its own trait and run it at that stage.
 
 ## Writing a test here
 
@@ -99,6 +108,9 @@ Also covered beyond the spec's list:
 | Forcing an unavailable encoder falls back, reports what was used | `Encoders/EncoderSelectionTests` (QSV advertised, no Intel GPU → trial fails) | Gpu |
 | Repeated software-encoder failure stops loudly | `Supervision/EncoderSupervisorTests` | Ffmpeg |
 | External termination does not count toward fallback | `Supervision/EncoderSupervisorTests` | Ffmpeg |
+| A lost desktop retries for ever and never ends the session | `Supervision/EncoderSupervisorTests` (real FFmpeg writes a real gdigrab capture-loss line) | Ffmpeg |
+| Capture-loss signatures are really strings inside the shipped ffmpeg.exe | `Supervision/CaptureLossSignatureTests` | Ffmpeg |
+| One encoder process's log never condemns the next one's exit | `Supervision/LogRingBufferTests` (unit) | — |
 | Killing the UI mid-recording does not interrupt capture; relaunch reattaches | `Ui/UiIndependenceTests` | Gpu |
 | Local transfer renames, copies, verifies, never overwrites | `Transfers/FolderDestinationTests` (unit) + `verify-install.ps1` | — |
 | Cloud transfer resumes from the correct offset after interruption | `Transfers/GraphUploaderTests` against `MockGraphServer` | — |
@@ -150,7 +162,9 @@ are **deferred** to the runbook. The licence report gate runs on every build.
 | Trailing bytes of the last segment corrupted, then recovery | `ChaosTests` |
 | Working folder deleted mid-session | `ChaosTests` |
 | **Power loss mid-write** | partial — the truncated-segment and corrupted-tail cases reproduce its on-disk artefact; a true power cut is **deferred** (manual). |
-| UAC secure desktop / session switch tolerated with backoff, never counted as an encoder fault | `Supervision/SupervisorPolicyTests` (classification + capped backoff + reset) | — |
+| UAC secure desktop / session lock / remote disconnect tolerated with backoff, never counted as an encoder fault | `Supervision/SupervisorPolicyTests` (classification of the real ddagrab AND gdigrab wording + capped backoff + reset), `Supervision/EncoderSupervisorTests` end to end | — |
+| A gap still open when the session ends is journaled, so coverage cannot over-report | `Supervision/EncoderSupervisorTests` | Ffmpeg |
+| Screen saver / auto-lock reported before a recording, never overridden | `WindowsEvents/IdleLockPolicyTests` (unit) + `captr doctor` against real registry states | — |
 | **Disk filled to zero; display unplugged / resolution / DPI changed; sleep-resume; lock-unlock; RDP connect-disconnect; GPU driver reset** | **deferred** — each needs hardware or admin state this machine cannot script safely. The handling code paths exist and are reviewed (`WindowsEvents`, `DiskGuard`, topology rebuild, capture-loss backoff); the runbook lists them as manual checks. |
 
 ## Soak — `tests/Captr.Integration.Tests/Soak`

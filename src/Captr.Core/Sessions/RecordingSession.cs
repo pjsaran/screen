@@ -114,6 +114,24 @@ public sealed class RecordingSession
         SessionContext context, SessionStarted startEvent, ILogger log)
     {
         SessionJournal journal = SessionJournal.CreateNew(context.WorkingFolder, startEvent);
+
+        // Say up front what this machine will do to an unattended recording. Captr
+        // holds the display awake for the whole session, but a screen saver or a
+        // workstation lock runs off the input-idle timer, which no execution-state
+        // request affects — and the inactivity lock is a security setting Captr has
+        // no business overriding. Recorded at the START so that whoever reads the
+        // journal after a gap already knows the answer, instead of inferring it.
+        IdleLockPolicy idlePolicy = IdleLockPolicy.Read();
+        if (idlePolicy.WillInterruptARecording)
+        {
+            journal.Append(new SessionNote
+            {
+                TimestampUtc = DateTimeOffset.UtcNow,
+                Text = idlePolicy.Describe(),
+            });
+            log.Warning("Unattended recording will be interrupted: {Policy}", idlePolicy.Describe());
+        }
+
         var diskGuard = new DiskGuard(context.WorkingFolder, context.MeasuredBytesPerHour);
         diskGuard.ReserveBallast();
         return new RecordingSession(context, journal, diskGuard, log);
@@ -169,9 +187,16 @@ public sealed class RecordingSession
             // Lock: record it, keep recording — never stop (SPEC §6).
             SessionChangeKind.SessionLock => SessionCommand.NoteLocked,
             SessionChangeKind.SessionUnlock => SessionCommand.NoteUnlocked,
-            // RDP/console transitions: capture may fail; the supervisor's stall
-            // detection restarts, and honest gaps accumulate until it returns.
-            SessionChangeKind.ConsoleDisconnect or SessionChangeKind.RemoteConnect => SessionCommand.NoteConsoleLost,
+
+            // DISCONNECT is when the desktop goes away: the console session was
+            // handed over, or a remote client (RDP, Citrix, AWS WorkSpaces) closed
+            // its window. CONNECT is the opposite — the desktop is back. These two
+            // were once mapped the wrong way round, which made the journal of a
+            // WorkSpaces session claim the desktop had RETURNED at the exact moment
+            // it went away. Capture keeps trying throughout either way; the notes
+            // exist so the journal explains the gap afterwards.
+            SessionChangeKind.ConsoleDisconnect or SessionChangeKind.RemoteDisconnect =>
+                SessionCommand.NoteConsoleLost,
             _ => SessionCommand.NoteConsoleReturned,
         });
     }
@@ -341,10 +366,12 @@ public sealed class RecordingSession
                     Note("Workstation unlocked.");
                     break;
                 case SessionCommand.NoteConsoleLost:
-                    Note("Console session lost (remote desktop or disconnect) — capture will gap until it returns.");
+                    Note("The desktop was disconnected (someone closed the remote session, or the console " +
+                         "was handed over). Recording keeps running and resumes on its own when the desktop " +
+                         "comes back; the time in between is recorded as a gap.");
                     break;
                 case SessionCommand.NoteConsoleReturned:
-                    Note("Console session returned.");
+                    Note("The desktop is back — capture resumes.");
                     break;
                 case SessionCommand.ClockChanged:
                     _journal.Append(new ClockJumped { TimestampUtc = DateTimeOffset.UtcNow, ApparentJump = TimeSpan.Zero });

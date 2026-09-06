@@ -103,6 +103,65 @@ public class EncoderSupervisorTests
     }
 
     [Fact]
+    public async Task A_lost_desktop_retries_for_ever_and_never_ends_the_session()
+    {
+        // THE REGRESSION THIS PINS DOWN. A locked screen, a UAC prompt, or a closed
+        // remote-desktop window makes FFmpeg exit with an error, but no other
+        // encoder could have recorded a desktop that is not there — so it must
+        // retry, not count toward the fallback, and never end the recording
+        // (SPEC §6).
+        //
+        // Captr got this wrong in the only way that mattered: it matched log text
+        // FFmpeg never prints, so every lost desktop was booked as an encoder fault.
+        // On a machine with no hardware encoder there is no fallback to absorb them,
+        // so three of them inside five minutes stopped the recording outright.
+        //
+        // The arguments below make FFmpeg itself write a real gdigrab capture-loss
+        // line into its report file (the missing input is named after one), so this
+        // exercises the whole chain rather than handing a string to the classifier.
+        using var session = new SupervisionTestSession();
+        var supervisor = new EncoderSupervisor(session.FfmpegPath, session.Journal, Logger.None);
+
+        // No fallback arguments — deliberately the AWS WorkSpaces shape, where the
+        // software encoder IS the primary and there is nothing left to fall back to.
+        var spec = new EncoderRunSpec(session.CaptureLossArguments(), null, session.WorkingFolder);
+
+        using var stop = new CancellationTokenSource();
+        Task<SupervisionOutcome> run = supervisor.RunAsync(spec, null, stop.Token);
+
+        // Far past the three faults that used to end the session. The backoff is
+        // 1s, 2s, 4s… so five launches take roughly eight seconds.
+        await WaitUntilAsync(
+            () => session.ReadJournal().OfType<EncoderProcessLaunched>().Count() >= 5,
+            TimeSpan.FromSeconds(40));
+
+        run.IsCompleted.ShouldBeFalse("a desktop that is away must never end the recording");
+
+        await stop.CancelAsync();
+        SupervisionOutcome outcome = await run;
+        outcome.Kind.ShouldBe(SupervisionEndKind.StoppedGracefully);
+
+        IReadOnlyList<JournalEvent> events = session.ReadJournal();
+        events.OfType<EncoderFellBack>().ShouldBeEmpty("a different encoder cannot conjure a desktop");
+        events.OfType<EncoderRestarted>()
+            .ShouldAllBe(e => !e.CountsTowardFallback, "capture losses never count toward the fallback");
+
+        // The outage is journaled ONCE, not once per retry: a disconnected remote
+        // session can last for hours and would otherwise bury the journal.
+        events.OfType<SessionNote>()
+            .Count(note => note.Text.Contains("nothing to capture", StringComparison.Ordinal))
+            .ShouldBe(1);
+
+        // The session ended while capture was still down, so nothing ever arrived to
+        // close the hole. It must be journaled anyway: coverage is computed from
+        // journaled gaps, and without this the recording would claim to be
+        // continuous across a stretch it captured nothing during (SPEC §13).
+        GapRecorded gap = events.OfType<GapRecorded>().ShouldHaveSingleItem();
+        gap.Reason.ShouldBe("capture unavailable");
+        gap.Duration.ShouldBeGreaterThan(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task A_flooded_encoder_log_neither_deadlocks_nor_exhausts_memory()
     {
         // Scenario: SPEC §5/§14 — flood the encoder's log output while consuming

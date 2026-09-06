@@ -42,5 +42,46 @@ Why the unusual choices:
   encoder. The distinction is a documented heuristic: an exit is a FAULT if the log
   tail around death contains encoder errors or the process died of a detected
   stall; an exit with a healthy progress stream and a clean log is external.
+- **A lost desktop is not a fault.** When there is nothing on screen to capture —
+  UAC's secure desktop, a locked workstation, a remote client (RDP, Citrix, AWS
+  WorkSpaces) closing its window — FFmpeg exits with an error, but no other encoder
+  could have done better. Those exits are classified `CaptureAccessLost`: retry with
+  backoff, forever, and never count toward the fallback. The session keeps running
+  and picks up again by itself; the hole is journaled as a gap with the reason
+  `capture unavailable`.
+- **Each encoder process is judged on its own log.** The ring buffer spans the whole
+  session, but classification reads only the slice written since the current process
+  launched (`LogRingBuffer.SnapshotSince`). Without that, one stale `Error` line
+  condemns every later exit, and faults end recordings.
+- **Stale progress is never fed to the policy.** Right after a relaunch,
+  `LatestProgress` still holds the dead process's final snapshot. Handing it to the
+  policy sets the stall clock to a moment already in the past — which kills the
+  fresh, healthy encoder instantly — and claims the desktop is back before a single
+  frame exists. The monitor loop only accepts progress observed *after*
+  `LaunchedUtc`.
 
 Thresholds live in `SupervisionConstants` with the consequence of changing each.
+
+## The FFmpeg wording contract
+
+`SupervisorPolicy.CaptureAccessLostSignatures` matches literal text out of FFmpeg's
+log. That is a contract with a third-party binary and **the compiler cannot check
+it**, so it is verified instead: `CaptureLossSignatureTests` reads the shipped
+`ffmpeg.exe` and asserts every signature is really a string inside it.
+
+Take this seriously. The list originally matched `ACCESS_LOST`, `ACCESS_DENIED`, and
+`"Failed to duplicate output"` — none of which FFmpeg has ever printed. The unit
+tests passed because they fed the classifier those same invented lines, so the
+tolerate-a-lost-desktop path was dead code from the day it was written. On a machine
+with no hardware encoder, and therefore no fallback left to take, three lost-desktop
+events inside five minutes ended the recording outright.
+
+If a future FFmpeg bump changes the wording, that test fails. Fix it by pasting the
+new text out of the binary:
+
+```sh
+grep -c "Failed to capture image" tools/ffmpeg/bin/ffmpeg.exe
+```
+
+Never from memory, and never from FFmpeg's source on the internet — only from the
+build we actually ship.

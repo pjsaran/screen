@@ -11,6 +11,7 @@ public sealed class LogRingBuffer
     private readonly Queue<string> _lines;
     private readonly int _capacity;
     private readonly Lock _gate = new();
+    private long _everAdded;
 
     public LogRingBuffer(int capacity = SupervisionConstants.LogTailLines)
     {
@@ -29,6 +30,42 @@ public sealed class LogRingBuffer
             }
 
             _lines.Enqueue(line);
+            _everAdded++;
+        }
+    }
+
+    /// <summary>
+    /// A bookmark in the line stream, for <see cref="SnapshotSince"/>. Take one when
+    /// an encoder process is launched so its exit can be judged on ITS OWN output.
+    /// </summary>
+    public long Mark()
+    {
+        lock (_gate)
+        {
+            return _everAdded;
+        }
+    }
+
+    /// <summary>
+    /// The lines added since <paramref name="mark"/>, oldest first.
+    /// </summary>
+    /// <remarks>
+    /// Why this exists: the buffer spans the whole session, and FFmpeg's report file
+    /// is rewritten by every relaunch, so one early "Error" line used to sit in the
+    /// tail for hundreds of lines and make every LATER exit — including a perfectly
+    /// clean external one — classify as a fault. Faults march the session toward a
+    /// loud stop, so a single stale line could end a recording nobody asked to end.
+    /// Diagnostics still want the whole tail; only classification wants this slice.
+    /// Lines evicted since the mark are simply gone — the slice is a best effort,
+    /// which is exactly right for a bounded buffer.
+    /// </remarks>
+    public IReadOnlyList<string> SnapshotSince(long mark)
+    {
+        lock (_gate)
+        {
+            long oldestHeld = _everAdded - _lines.Count;
+            int skip = (int)Math.Clamp(mark - oldestHeld, 0, _lines.Count);
+            return [.. _lines.Skip(skip)];
         }
     }
 

@@ -276,6 +276,80 @@ those rows while the folder still exists would make it conclude the recording ha
 never been transferred anywhere and keep it for ever. History outlives the file it
 describes, never the other way round.
 
+**A lost desktop is classified by FFmpeg's real wording, and that wording is tested
+against the shipped binary.** Supervision splits an unexpected encoder exit into a
+fault — which counts toward the one permitted fallback and eventually stops the
+session loudly — and a capture-access loss, which retries forever with backoff and
+counts toward nothing, because no encoder on earth can record a desktop that is not
+there. The split is decided by matching literal strings in FFmpeg's log.
+
+Those strings were originally written from memory: `ACCESS_LOST`, `ACCESS_DENIED`,
+and `"Failed to duplicate output"`. FFmpeg prints none of them. The classifier
+therefore never once recognised a lost desktop in production, and the unit tests
+agreed with it, because they fed it the same three invented lines. Every locked
+workstation, UAC prompt, and disconnected remote session was booked as an encoder
+fault instead.
+
+On a desktop PC this was survivable: hardware encoders exist, so the fallback rung
+absorbed the first three faults. On an AWS WorkSpace it was not. There is no
+hardware encoder there, so the plan starts on the software encoder and
+`FallbackArguments` is null — meaning the very first time the fault counter reached
+three, the supervisor skipped the fallback branch and went straight to stopping the
+session. Three screen locks inside five minutes ended the recording, and the user
+saw it simply stop.
+
+The fix is three-part, because one bug had three enablers. The signatures are now
+verbatim strings pulled out of `tools/ffmpeg/bin/ffmpeg.exe` and cover gdigrab as
+well as ddagrab — WorkSpaces capture through GDI, whose failures look nothing like
+DXGI's. `CaptureLossSignatureTests` reads the shipped binary and fails if any
+signature is not really in it, which is the only kind of test that can hold a
+contract with someone else's log text. And classification now reads only the log
+lines the *current* encoder process wrote: the ring buffer spans the whole session,
+so a single stale `Error` line used to condemn every later exit, including clean
+ones.
+
+Two smaller faults in the same path were fixed alongside, both of which made the
+first one worse. The monitor loop fed the policy `LatestProgress` even when it still
+held the dead process's final snapshot — which set the stall clock to a moment
+already in the past and killed the fresh encoder instantly (guaranteed after any
+capture-loss backoff, since the backoff itself makes the old progress stale), and
+which reset the retry backoff before a single new frame existed, pinning it at one
+second forever. And the WTS session-change mapping had remote connect and disconnect
+the wrong way round, so a WorkSpaces journal announced that the desktop had returned
+at the exact moment it went away.
+
+**Captr reports what will interrupt an unattended recording; it never overrides it.**
+A recording left running alone is at the mercy of four machine behaviours, and they
+are not one problem. System sleep and display power-off are *ours to prevent* and
+mandatory to prevent: `ExecutionStateHolder` holds a system-and-display-required
+execution state for the whole session, because a powered-off display makes Desktop
+Duplication return black frames — a recording that looks healthy and contains
+nothing.
+
+The screen saver and the workstation lock are a different mechanism and not ours to
+touch. Both run off the input-idle timer — time since a real keystroke or mouse move
+— which no execution-state request affects. There is no Windows API that suppresses
+the Group Policy machine inactivity lock at all; the only thing that defeats it is
+synthesising fake input on a timer, which is a mouse jiggler by another name. That
+overrides a security control the machine's owner deliberately set, and on a managed
+machine it is the sort of thing endpoint tooling flags. Recording someone's screen is
+already a capability that has to be beyond reproach; quietly defeating their lock
+policy to do it is not a trade Captr makes.
+
+So `IdleLockPolicy` reads the machine's real configuration — policy keys first, since
+on a managed machine the user's own Personalisation page may say something the policy
+overrides — and the answer is surfaced twice: as the **Unattended recording**
+diagnostic, and as a note journaled at recording start, from the same `Describe()`
+so the two can never disagree. Timing is the point. Told at start, it is a setting to
+change; discovered at the end, it is three lost hours.
+
+The two outcomes are reported separately because they are not equally bad. A locking
+screen saver or an inactivity lock switches to the secure desktop, capture access is
+lost, and the gap is honest and self-healing. A **non-locking** screen saver stays on
+the ordinary desktop, so capture works perfectly and faithfully records the screen
+saver: no gap, no warning, content silently gone. Collapsing them into one warning
+would hide the one that lies.
+
 ## Things deliberately not built
 
 - **No scheduler, service, resident agent, telemetry, or auto-update** (§1, §11).
@@ -287,6 +361,9 @@ describes, never the other way round.
   anything finer requires re-encoding, which softens the picture and contradicts the
   point of a stream copy. Every video player and editor already trims, and Captr's
   job is producing footage that survives, not editing it.
-- **No second fallback rung, and never a capture-method change.** Frame rate may
-  degrade indefinitely; capture may not. GDI is never used, at any point, for
-  anything (§1, §6).
+- **No second fallback rung, and never a capture-method change MID-SESSION.**
+  Frame rate may degrade indefinitely; capture may not. Once a recording is running
+  it keeps the capture method it started with, so the footage cannot silently change
+  character halfway through (§1, §6). The capture method is chosen once, at start,
+  by proving it — see "Screen capture falls back to GDI when Desktop Duplication
+  cannot start" above.

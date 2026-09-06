@@ -85,6 +85,26 @@ public sealed class SupervisionTestSession : IDisposable
         "-f", "matroska", Path.Combine(WorkingFolder, "out.mkv"),
     ];
 
+    /// <summary>
+    /// Arguments that fail instantly AND leave a real gdigrab capture-loss line in
+    /// FFmpeg's own report file — because the missing input is NAMED after one.
+    /// </summary>
+    /// <remarks>
+    /// The trick is deliberate. What broke in production was not the classifier's
+    /// logic but its vocabulary, and every unit test bypassed the log file entirely
+    /// by handing the classifier a string. This makes FFmpeg itself write the line,
+    /// so the assertion covers the whole chain: report file → tail reader → ring
+    /// buffer → per-process slice → classification → backoff → relaunch.
+    /// </remarks>
+    public List<string> CaptureLossArguments() =>
+    [
+        "-hide_banner", "-nostats", "-loglevel", "warning",
+        "-i", Path.Combine(WorkingFolder, "Failed to capture image (error 6).mp4"),
+        "-c:v", "libopenh264",
+        "-progress", Path.Combine(WorkingFolder, Captr.Core.Encoders.EncodingConstants.ProgressFileName),
+        "-f", "matroska", Path.Combine(WorkingFolder, "out.mkv"),
+    ];
+
     public IReadOnlyList<JournalEvent> ReadJournal() =>
         SessionJournal.ReadAll(Path.Combine(WorkingFolder, SessionJournal.FileName));
 

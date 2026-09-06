@@ -7,10 +7,20 @@ namespace Captr.Integration.Tests.Cli;
 
 /// <summary>
 /// The CLI's published contract (SPEC §14: "every command produces correct exit
-/// codes and valid JSON"). Runs against the published payload; the read-only
-/// commands need no recording, so this is Ffmpeg-trait (CI-safe) rather than Gpu.
+/// codes and valid JSON"). Deliberately runs against the PUBLISHED payload —
+/// <c>publish/captr.exe</c> — because that is the file a scheduled task actually
+/// invokes, and the apphost rename it depends on happens at publish time.
 /// </summary>
-[Trait("Category", "Ffmpeg")]
+/// <remarks>
+/// Its own category, and the reason is an ordering one rather than a hardware one.
+/// These tests were once trait <c>Ffmpeg</c>: correct about needing no GPU and no
+/// desktop, but wrong about what "CI-safe" means, because <c>publish/</c> does not
+/// exist until the packaging step that runs AFTER the test steps. They passed only
+/// on a machine with a stale <c>publish/</c> from an earlier run, and failed on
+/// every clean clone and every CI run. A category is a promise about what a test
+/// needs; this one needs a published payload, so it says so.
+/// </remarks>
+[Trait("Category", "Published")]
 public class CliContractTests
 {
     private static string Cli()

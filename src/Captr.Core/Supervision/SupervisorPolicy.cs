@@ -185,17 +185,54 @@ public sealed class SupervisorPolicy
     public void OnCaptureRecovered() => _consecutiveCaptureLosses = 0;
 
     /// <summary>
-    /// Log signatures of "the desktop was taken away from us" — DXGI access loss,
+    /// Log signatures of "the desktop was taken away from us" — a capture failure,
     /// not encoder trouble. Deliberately NARROW: matching any line that merely
-    /// mentions ddagrab would classify genuine capture faults as transient and
-    /// quietly disable the fallback ladder, so only these specific access failures
-    /// count.
+    /// mentions ddagrab or gdigrab would classify genuine capture faults as
+    /// transient and quietly disable the fallback ladder, so only these specific
+    /// access failures count.
     /// </summary>
+    /// <remarks>
+    /// MEASURED, not imagined. Every entry below is a verbatim format string taken
+    /// out of the ffmpeg.exe we ship — verify with:
+    /// <c>grep -c "Failed to capture image" tools/ffmpeg/bin/ffmpeg.exe</c>.
+    /// <para>
+    /// An earlier version of this list matched <c>ACCESS_LOST</c>,
+    /// <c>ACCESS_DENIED</c>, and <c>"Failed to duplicate output"</c>. FFmpeg prints
+    /// none of those three, so the whole tolerate-with-backoff path was unreachable
+    /// and every lost desktop was booked as an encoder fault instead. On a machine
+    /// with no hardware encoder — an AWS WorkSpace — three of them inside five
+    /// minutes ended the recording outright. Anything added here MUST be pasted
+    /// from the binary, never from memory.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] Signatures =
+    [
+        // ddagrab / DXGI Desktop Duplication: the secure desktop (UAC) owns the
+        // screen, or the duplication could not be handed back after a switch.
+        "Desktop duplication access denied",
+        "Failed duplicating output",
+        "Failed querying IDXGIOutput1",
+
+        // gdigrab / GDI — the capture method used where Desktop Duplication does
+        // not exist (AWS WorkSpaces, Citrix, some VMs). When the session is
+        // disconnected or locked there is no desktop to copy pixels FROM, so the
+        // blit and the device-context calls simply fail.
+        "Failed to capture image",
+        "Couldn't get window device context",
+        "Couldn't get window rectangle",
+    ];
+
+    /// <summary>
+    /// The signatures above, exposed so a test can assert that every one of them is
+    /// still a literal string inside the FFmpeg binary we ship. That test is the
+    /// only thing standing between this list and silently rotting again the next
+    /// time the pinned build changes its wording.
+    /// </summary>
+    public static IReadOnlyList<string> CaptureAccessLostSignatures => Signatures;
+
     private static bool IndicatesCaptureAccessLost(IReadOnlyList<string> logTail) =>
-        logTail.Any(static line =>
-            line.Contains("ACCESS_LOST", StringComparison.OrdinalIgnoreCase)
-            || line.Contains("ACCESS_DENIED", StringComparison.OrdinalIgnoreCase)
-            || line.Contains("Failed to duplicate output", StringComparison.OrdinalIgnoreCase));
+        logTail.Any(static line => Signatures.Any(
+            signature => line.Contains(signature, StringComparison.OrdinalIgnoreCase)));
 }
 
 /// <summary>How an encoder exit is classified.</summary>

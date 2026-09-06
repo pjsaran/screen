@@ -5,6 +5,7 @@ using Captr.Core.Secrets;
 using Captr.Core.Sessions;
 using Captr.Core.Settings;
 using Captr.Core.Transfers;
+using Captr.Core.WindowsEvents;
 
 namespace Captr.Core.Diagnostics;
 
@@ -40,6 +41,7 @@ public static class HealthReport
         CheckFfmpeg(checks);
         CheckEncoderSupport(checks);
         CheckDisplays(checks, settings);
+        CheckIdleLock(checks);
         CheckEncoder(checks, settings);
         CheckWorkingFolder(checks, settings);
         CheckDestinations(checks, settings);
@@ -250,6 +252,44 @@ public static class HealthReport
     /// A miss is not a fault — it just means the next recording spends a few seconds
     /// proving one — so it is reported as information, not as a problem.
     /// </summary>
+    /// <summary>
+    /// What the machine will do to an unattended recording. Captr already keeps the
+    /// system awake and the display on (<c>ExecutionStateHolder</c>), but the screen
+    /// saver and the workstation lock run off the input-idle timer, which no
+    /// execution-state request affects — and the inactivity lock is a security
+    /// control that Captr has no business overriding. So this check reports it, in
+    /// time to be useful: before a three-hour recording rather than after.
+    /// </summary>
+    private static void CheckIdleLock(List<HealthCheck> checks)
+    {
+        IdleLockPolicy policy = IdleLockPolicy.Read();
+
+        if (!policy.WillInterruptARecording)
+        {
+            checks.Add(new(
+                "Unattended recording",
+                HealthLevel.Ok,
+                "Nothing on this machine locks the screen or starts a screen saver when it is left alone, " +
+                "and Captr holds the display awake while recording.",
+                null));
+            return;
+        }
+
+        checks.Add(new(
+            "Unattended recording",
+            HealthLevel.Attention,
+            policy.Describe(),
+            // ASCII '>' rather than an arrow on purpose: the console this also prints
+            // to transliterates what it can (an em dash becomes a hyphen) and DROPS
+            // what it cannot, which turned "Settings -> Personalisation" into
+            // "Settings  Personalisation". A path the reader has to follow must not
+            // depend on a character that can silently vanish.
+            "Captr will not override this — the lock is a security setting, and suppressing it means faking " +
+            "keyboard activity. If a long unattended recording matters more, change the timeout in Windows " +
+            "(Settings > Personalisation > Lock screen > Screen saver), or ask whoever manages this " +
+            "machine, since a policy-set timeout cannot be changed locally."));
+    }
+
     private static void CheckEncoder(List<HealthCheck> checks, CaptrSettings? settings)
     {
         if (settings is null)

@@ -63,24 +63,38 @@ public sealed class EncoderSupervisor
     {
         IReadOnlyList<string> currentArguments = spec.PrimaryArguments;
         FfmpegProcess? process = adoptedProcess;
-        DateTimeOffset? pendingGapStartUtc = null;
+        var pendingGap = new PendingGap();
+        var captureOutage = new CaptureOutage();
+
+        string progressPath = Path.Combine(
+            spec.WorkingFolder, Captr.Core.Encoders.EncodingConstants.ProgressFileName);
+        string reportPath = Path.Combine(spec.WorkingFolder, FfmpegProcess.ReportFileName);
 
         using var progressTailCts = new CancellationTokenSource();
-        Task progressTail = new FileTailReader(
-                Path.Combine(spec.WorkingFolder, Captr.Core.Encoders.EncodingConstants.ProgressFileName),
-                OnProgressLine)
-            .TailAsync(0, progressTailCts.Token);
-        Task reportTail = new FileTailReader(
-                Path.Combine(spec.WorkingFolder, FfmpegProcess.ReportFileName),
-                _logTail.Add)
-            .TailAsync(0, progressTailCts.Token);
+        var progressReader = new FileTailReader(progressPath, OnProgressLine);
+        var reportReader = new FileTailReader(reportPath, _logTail.Add);
+        Task progressTail = progressReader.TailAsync(0, progressTailCts.Token);
+        Task reportTail = reportReader.TailAsync(0, progressTailCts.Token);
 
         try
         {
             while (true)
             {
+                // Bookmark the log BEFORE this process starts writing to it, so its
+                // exit is judged on its OWN output (see LogRingBuffer.SnapshotSince).
+                long processLogMark = _logTail.Mark();
                 if (process is null)
                 {
+                    // Hand the readers a clean slate for the incoming process. Both
+                    // steps matter: deleting means the only bytes that can ever be
+                    // read from offset 0 belong to the NEW process, and Restart means
+                    // the rewind happens whatever the file lengths look like. See
+                    // FileTailReader.Restart for the failure this prevents.
+                    DeleteIfPresent(reportPath);
+                    DeleteIfPresent(progressPath);
+                    reportReader.Restart();
+                    progressReader.Restart();
+
                     process = LaunchAndJournal(currentArguments, spec.WorkingFolder, reportLogLevel);
                 }
                 else
@@ -89,7 +103,7 @@ public sealed class EncoderSupervisor
                 }
 
                 (bool stopRequested, bool killedForStall) = await MonitorUntilExitAsync(
-                    process, spec.WorkingFolder, () => pendingGapStartUtc, start => pendingGapStartUtc = start, stopToken)
+                    process, spec.WorkingFolder, pendingGap, captureOutage, stopToken)
                     .ConfigureAwait(false);
 
                 int exitCode = SafeExitCode(process);
@@ -101,10 +115,12 @@ public sealed class EncoderSupervisor
                     return new SupervisionOutcome(SupervisionEndKind.StoppedGracefully, null, _logTail.Snapshot());
                 }
 
-                // The encoder is down and we did not ask for it — classify and decide.
+                // The encoder is down and we did not ask for it — classify and decide,
+                // reading only the lines THIS process wrote.
+                IReadOnlyList<string> processLog = _logTail.SnapshotSince(processLogMark);
                 ExitKind exitKind = SupervisorPolicy.ClassifyExit(
-                    stopWasRequested: false, killedForStall, exitCode, _logTail.Snapshot());
-                pendingGapStartUtc ??= DateTimeOffset.UtcNow;
+                    stopWasRequested: false, killedForStall, exitCode, processLog);
+                pendingGap.StartUtc ??= DateTimeOffset.UtcNow;
 
                 // The desktop went away (UAC secure desktop, session switch, RDP).
                 // Wait before trying again instead of hammering DXGI, and do NOT
@@ -113,15 +129,27 @@ public sealed class EncoderSupervisor
                 if (exitKind == ExitKind.CaptureAccessLost)
                 {
                     TimeSpan delay = _policy.NextCaptureRetryDelay();
+                    pendingGap.Reason = "capture unavailable";
                     _log.Warning(
-                        "Capture access lost (secure desktop, session switch, or remote-desktop transition); retrying in {Delay}",
+                        "Capture access lost (secure desktop, session lock, or remote-session disconnect); retrying in {Delay}",
                         delay);
-                    _journal.Append(new SessionNote
+
+                    // Journal the START of the outage, not every retry. A disconnected
+                    // remote session can last for hours; one note per retry would bury
+                    // the journal in thousands of identical lines and say nothing the
+                    // closing gap does not already say.
+                    if (captureOutage.SinceUtc is null)
                     {
-                        TimestampUtc = DateTimeOffset.UtcNow,
-                        Text = $"Capture access lost; waiting {delay.TotalSeconds:F0}s before trying again. " +
-                               "The gap is recorded; recording resumes as soon as the desktop returns.",
-                    });
+                        captureOutage.SinceUtc = DateTimeOffset.UtcNow;
+                        _journal.Append(new SessionNote
+                        {
+                            TimestampUtc = captureOutage.SinceUtc.Value,
+                            Text = "There is nothing to capture right now — the desktop is unavailable " +
+                                   "(locked, showing the secure desktop, or the remote session is " +
+                                   "disconnected). Recording is still running and picks up by itself the " +
+                                   "moment the desktop returns; the time in between is recorded as a gap.",
+                        });
+                    }
 
                     try
                     {
@@ -141,7 +169,7 @@ public sealed class EncoderSupervisor
                     TimestampUtc = DateTimeOffset.UtcNow,
                     Reason = killedForStall ? "stall detected" : $"unexpected exit (code {exitCode}, {exitKind})",
                     CountsTowardFallback = countsTowardFallback,
-                    LogTail = _logTail.Snapshot(),
+                    LogTail = processLog,
                 });
                 _log.Warning(
                     "Encoder exited unexpectedly (code {ExitCode}, classified {ExitKind}); restarting into a new segment",
@@ -167,9 +195,7 @@ public sealed class EncoderSupervisor
                         case FaultVerdict.FallBackToSoftware:
                         // No fallback encoder available: repeated faults must stop loudly.
                         case FaultVerdict.StopLoudly:
-                            string reason = _policy.HasFallenBack
-                                ? "The software encoder also failed repeatedly. Recording cannot continue reliably."
-                                : "The encoder failed repeatedly and no software fallback is available.";
+                            string reason = DescribeStopLoudlyReason(currentArguments, spec.FallbackArguments);
                             _log.Error("Stopping loudly: {Reason}", reason);
                             return new SupervisionOutcome(SupervisionEndKind.FailedLoudly, reason, _logTail.Snapshot());
                     }
@@ -180,9 +206,49 @@ public sealed class EncoderSupervisor
         }
         finally
         {
+            // A hole that never closed: the run ended while capture was still down,
+            // so no later frame ever arrived to close it. Journal it now, running to
+            // this moment.
+            //
+            // This is not tidiness. Coverage is computed from journaled gaps
+            // (CoverageCalculator), so an unclosed gap makes Captr report a stretch
+            // it captured nothing during as fully recorded — presenting a recording
+            // as continuous when it is not, which is the one thing SPEC §13 forbids
+            // most explicitly. Before capture-loss handling actually worked this path
+            // was unreachable; now that a session can genuinely sit waiting for a
+            // desktop that never returns, it is not.
+            if (pendingGap.StartUtc is { } unclosedGapStart)
+            {
+                DateTimeOffset endedUtc = DateTimeOffset.UtcNow;
+                _journal.Append(new GapRecorded
+                {
+                    TimestampUtc = endedUtc,
+                    GapStartUtc = unclosedGapStart,
+                    Duration = endedUtc - unclosedGapStart,
+                    Reason = pendingGap.Reason,
+                });
+                _log.Warning("The run ended with capture still down; a {Seconds:F0}s gap ({Reason}) is journaled",
+                    (endedUtc - unclosedGapStart).TotalSeconds, pendingGap.Reason);
+                pendingGap.Clear();
+            }
+
             process?.Dispose();
             await progressTailCts.CancelAsync().ConfigureAwait(false);
             await Task.WhenAll(progressTail, reportTail).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Removes a file the encoder is about to rewrite. Best effort: if it
+    /// cannot be deleted the reader's shrink detection is still there, and losing a
+    /// diagnostic file must never stop a recording.</summary>
+    private static void DeleteIfPresent(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
         }
     }
 
@@ -209,8 +275,8 @@ public sealed class EncoderSupervisor
     private async Task<(bool StopRequested, bool KilledForStall)> MonitorUntilExitAsync(
         FfmpegProcess process,
         string workingFolder,
-        Func<DateTimeOffset?> getPendingGapStart,
-        Action<DateTimeOffset?> setPendingGapStart,
+        PendingGap pendingGap,
+        CaptureOutage captureOutage,
         CancellationToken stopToken)
     {
         while (true)
@@ -230,28 +296,38 @@ public sealed class EncoderSupervisor
 
             DateTimeOffset now = DateTimeOffset.UtcNow;
 
-            // Feed the policy the freshest observations.
-            if (_latestProgress is { } progress)
+            // Feed the policy the freshest observations — but ONLY ones this process
+            // actually produced. Right after a relaunch _latestProgress still holds
+            // the DEAD process's final snapshot, and handing that to the policy does
+            // two harmful things: it sets the stall clock to a moment already in the
+            // past, so a fresh, healthy encoder is killed for "stalling" the instant
+            // the previous progress is older than the stall timeout — which a
+            // capture-loss backoff guarantees — and it announces that frames are
+            // flowing again before a single new frame exists, pinning the backoff at
+            // one second forever. The same staleness once produced negative gap
+            // durations (coverage over 100%, caught by the chaos suite).
+            if (_latestProgress is { } progress && progress.ObservedUtc > _policy.LaunchedUtc)
             {
                 _policy.OnProgress(progress);
                 _policy.OnCaptureRecovered(); // frames are flowing — the desktop is back
+                captureOutage.SinceUtc = null;
 
-                // A pending gap (from a previous restart) closes at the first
-                // progress of the new process — journal its honest duration.
-                // The observation must POST-DATE the gap: right after a relaunch,
-                // _latestProgress still holds the dead process's final snapshot,
-                // and closing against it once produced negative gap durations
-                // (coverage over 100% — caught by the chaos suite).
-                if (getPendingGapStart() is { } gapStart && progress.ObservedUtc > gapStart)
+                // A pending gap (from a previous restart) closes at the first progress
+                // of the new process — journal its honest duration, and say WHY it
+                // happened: "the desktop was gone" and "the encoder crashed" ask
+                // completely different things of whoever reads this later.
+                if (pendingGap.StartUtc is { } gapStart && progress.ObservedUtc > gapStart)
                 {
                     _journal.Append(new GapRecorded
                     {
                         TimestampUtc = now,
                         GapStartUtc = gapStart,
                         Duration = progress.ObservedUtc - gapStart,
-                        Reason = "encoder restart",
+                        Reason = pendingGap.Reason,
                     });
-                    setPendingGapStart(null);
+                    _log.Information("Capture resumed after {Seconds:F0}s ({Reason})",
+                        (progress.ObservedUtc - gapStart).TotalSeconds, pendingGap.Reason);
+                    pendingGap.Clear();
                 }
             }
 
@@ -260,7 +336,8 @@ public sealed class EncoderSupervisor
             if (_policy.DetectStall(now) is { } stallReason)
             {
                 _log.Warning("Encoder stalled: {Reason}. Killing and restarting into a new segment", stallReason);
-                setPendingGapStart(_latestProgress?.ObservedUtc ?? _policy.LaunchedUtc);
+                pendingGap.StartUtc = _latestProgress?.ObservedUtc ?? _policy.LaunchedUtc;
+                pendingGap.Reason = "encoder restart";
                 process.Kill();
                 await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
                 return (StopRequested: false, KilledForStall: true);
@@ -334,6 +411,58 @@ public sealed class EncoderSupervisor
         {
             return int.MinValue;
         }
+    }
+
+    /// <summary>
+    /// The sentence shown when the session gives up (SPEC §6: stop and report
+    /// loudly). It names the encoder that failed and whether anything was left to
+    /// try, because "no software fallback is available" reads as a packaging mistake
+    /// when the truth is that the software encoder IS the one that just failed.
+    /// </summary>
+    private string DescribeStopLoudlyReason(
+        IReadOnlyList<string> currentArguments, IReadOnlyList<string>? fallbackArguments)
+    {
+        string encoder = DescribeEncoder(currentArguments);
+        if (_policy.HasFallenBack)
+        {
+            return $"The software encoder ({encoder}) also failed repeatedly after the fallback. " +
+                   "Recording cannot continue reliably.";
+        }
+
+        if (fallbackArguments is null && Captr.Core.Encoders.EncoderCatalog.IsSoftware(encoder))
+        {
+            return $"The software encoder ({encoder}) failed repeatedly and there is no simpler encoder " +
+                   "left to fall back to. Recording cannot continue reliably.";
+        }
+
+        return $"The encoder ({encoder}) failed repeatedly and this FFmpeg build carries no software " +
+               "encoder to fall back to.";
+    }
+
+    /// <summary>
+    /// A hole in the recording that has started but not yet closed. It closes on the
+    /// first frame of the next process — the only moment its honest duration is known.
+    /// </summary>
+    private sealed class PendingGap
+    {
+        public DateTimeOffset? StartUtc { get; set; }
+
+        /// <summary>Why the hole exists, in words a reader of the journal can act on.</summary>
+        public string Reason { get; set; } = "encoder restart";
+
+        public void Clear()
+        {
+            StartUtc = null;
+            Reason = "encoder restart";
+        }
+    }
+
+    /// <summary>When the desktop went away, or null while it is there. Held in an
+    /// object because it is written from inside the monitor loop and read by the
+    /// restart loop, and a <c>ref</c> local cannot cross an <c>await</c>.</summary>
+    private sealed class CaptureOutage
+    {
+        public DateTimeOffset? SinceUtc { get; set; }
     }
 
     /// <summary>"-c:v hevc_nvenc" → "hevc_nvenc", for logs and the journal.</summary>

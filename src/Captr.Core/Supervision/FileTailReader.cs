@@ -14,12 +14,30 @@ public sealed class FileTailReader
 {
     private readonly string _path;
     private readonly Action<string> _onLine;
+    private int _restartRequested;
 
     public FileTailReader(string path, Action<string> onLine)
     {
         _path = path;
         _onLine = onLine;
     }
+
+    /// <summary>
+    /// Rewind to the start of the file on the next poll, because the writer is being
+    /// replaced.
+    /// </summary>
+    /// <remarks>
+    /// Shrink detection alone is not enough, and the gap is not theoretical. FFmpeg
+    /// truncates its report file on every relaunch, so a process that fails the SAME
+    /// way as its predecessor rewrites the file to exactly the same length — the
+    /// reader sees no shrink, concludes there is nothing new, and never reads a
+    /// single line the new process wrote. Classification then runs on an empty log
+    /// and falls through to the exit-code heuristic, which called repeated lost
+    /// desktops encoder faults and ended the recording. The supervisor deletes the
+    /// file and calls this before each launch, which together make the rewind
+    /// deterministic instead of dependent on how the lengths happen to compare.
+    /// </remarks>
+    public void Restart() => Interlocked.Exchange(ref _restartRequested, 1);
 
     /// <summary>
     /// Tails until cancelled. Starts from the given offset — 0 for a fresh file,
@@ -56,9 +74,13 @@ public sealed class FileTailReader
                 _path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
 
-            if (stream.Length < position)
+            // The flag is read FIRST so it is always consumed: behind a short-circuit
+            // it would survive a shrink-triggered rewind and force a second one on
+            // the next poll, re-emitting lines the callback had already seen.
+            if (Interlocked.Exchange(ref _restartRequested, 0) == 1 || stream.Length < position)
             {
-                // The file was truncated or recreated (an encoder restart) — start over.
+                // The file was truncated or recreated (an encoder restart), or the
+                // supervisor told us a new writer is taking over — start over.
                 position = 0;
                 carry.Clear();
             }

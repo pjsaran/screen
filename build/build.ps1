@@ -95,6 +95,14 @@ try {
         Copy-Item (Join-Path $RepoRoot 'tools\ffmpeg\licenses') (Join-Path $ffDir 'licenses') -Recurse -Force
 
         & (Join-Path $PSScriptRoot 'sign.ps1') -Target $pubDir
+
+        # The published payload exists only now, so the tests that drive it run
+        # here rather than in step 5 with everything else.
+        if (-not $SkipTests) {
+            Write-Host '   Published-payload tests (CLI contract) ---------------------' -ForegroundColor Cyan
+            dotnet test (Join-Path $RepoRoot 'tests\Captr.Integration.Tests') --configuration $Configuration --no-build --filter 'Category=Published'
+            if ($LASTEXITCODE -ne 0) { throw 'Published-payload tests failed.' }
+        }
     }
 
     if ($Installer) {

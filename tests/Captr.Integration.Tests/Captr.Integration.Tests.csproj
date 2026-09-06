@@ -4,6 +4,7 @@
 
   Tests are grouped by xunit trait "Category" so environments run what they can:
     Ffmpeg   needs the fetched ffmpeg.exe, but no display or GPU (lavfi inputs) — CI-safe
+    Published needs publish/captr.exe, so it runs only AFTER a publish step
     Display  needs a real interactive desktop (ddagrab capture)  — local machine only
     Gpu      needs real hardware encoders (NVENC/AMF/QSV)        — local machine only
     Chaos    destructive scenarios (kills, disk fill, corruption)
@@ -19,6 +20,35 @@
     <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
     <OutputType>Exe</OutputType>
   </PropertyGroup>
+
+  <!--
+    Fetch the pinned FFmpeg on a fresh clone, so `git clone` then `dotnet test`
+    simply works.
+
+    tools/ is gitignored on purpose — it holds ~100 MB of third-party binaries that
+    have no business in git history, and ffmpeg.lock.json pins the exact build with
+    a checksum. The cost of that correct decision used to land on whoever cloned the
+    repository next: every FFmpeg-category test failed, and the only way to know the
+    one command that fixes it was to read the failure text.
+
+    Safe by construction. It runs ONLY when ffmpeg.exe is genuinely absent, so CI —
+    which fetches explicitly in an earlier step — never triggers it, and neither does
+    any subsequent build. The script itself is idempotent and verifies the download
+    against the committed checksum. ContinueOnError keeps an offline machine building
+    exactly as it does today: the tests then fail with the fixture's own message,
+    which names the command to run. Opt out with -p:CaptrSkipFfmpegFetch=true.
+  -->
+  <Target Name="CaptrFetchFfmpegForTests" BeforeTargets="Build"
+          Condition="'$(CaptrSkipFfmpegFetch)' != 'true' And !Exists('$(MSBuildThisFileDirectory)..\..\tools\ffmpeg\bin\ffmpeg.exe')">
+    <Message Importance="high"
+             Text="Captr: tools/ffmpeg is missing, fetching the pinned build (one time, checksum-verified)..." />
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildThisFileDirectory)..\..\build\fetch-ffmpeg.ps1&quot;"
+          ContinueOnError="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="_CaptrFetchExit" />
+    </Exec>
+    <Message Importance="high" Condition="'$(_CaptrFetchExit)' != '0'"
+             Text="Captr: could not fetch FFmpeg (offline?). The build continues; FFmpeg-category tests will fail until you run: pwsh build/fetch-ffmpeg.ps1" />
+  </Target>
 
   <ItemGroup>
     <!-- Every test file uses xunit attributes; import the namespace once. -->
