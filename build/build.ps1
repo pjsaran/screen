@@ -48,6 +48,25 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'dotnet tool restore failed (see output above). The licence gate needs the nuget-license tool from dotnet-tools.json.' }
     & (Join-Path $PSScriptRoot 'fetch-ffmpeg.ps1')
 
+    # Every build must carry its source commit (SPEC §11; the published-payload tests
+    # refuse a commit of "unknown"). Directory.Build.targets asks git for it during
+    # compilation, but that call fails quietly when git is not on the PATH that dotnet
+    # sees, or when git refuses a copied folder as "dubious ownership". Resolve the
+    # commit here instead, fail early with the real reason, and hand it to MSBuild
+    # through the environment (MSBuild reads env vars as properties, and the targets
+    # file skips its own git call when SourceRevisionId is already set).
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        throw 'git is not on the PATH, so the build cannot stamp its source commit. Install Git for Windows (https://git-scm.com) and reopen the terminal.'
+    }
+    $gitOutput = & git -C $RepoRoot rev-parse --short=12 HEAD 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw ("git cannot read the commit for $RepoRoot`:`n$($gitOutput | Out-String)" +
+               "If it says 'dubious ownership', run:  git config --global --add safe.directory `"$RepoRoot`"`n" +
+               "If it says 'not a git repository', this folder was copied rather than cloned; clone it with git instead.")
+    }
+    $env:SourceRevisionId = "$gitOutput".Trim()
+    Write-Host "Source commit: $env:SourceRevisionId"
+
     Write-Host '== 2/7 Licence gate ===========================================' -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot 'check-licenses.ps1')
 
