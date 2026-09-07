@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Mechanically verifies every NuGet dependency (including transitive ones) carries a
     licence acceptable for commercial use, and keeps a committed report so drift is
@@ -54,7 +54,16 @@ try {
     # --- 1+2. Validate: any package outside the allowed list fails the run ---------
     $jsonOut = & dotnet nuget-license -i $solution -t -a $allowed -ignore $buildTimeOnly -include-ignored -o JsonPretty 2>&1
     $exit = $LASTEXITCODE
-    $parsed = $jsonOut | Where-Object { $_ -is [string] } | Out-String | ConvertFrom-Json
+    # Only stdout lines are JSON (stderr arrives as ErrorRecords via 2>&1). ConvertFrom-Json
+    # emits a bare $null for empty input, so drop nulls too or the count below lies.
+    $parsed = @($jsonOut | Where-Object { $_ -is [string] } | Out-String | ConvertFrom-Json | Where-Object { $null -ne $_ })
+    # No JSON at all means the tool itself did not run (typically: 'dotnet tool restore'
+    # never installed nuget-license). Say so plainly instead of crashing further down on
+    # an empty result, and echo the raw output so the real cause is visible.
+    if ($parsed.Count -eq 0) {
+        Write-Host ($jsonOut | Out-String)
+        throw "nuget-license produced no output (exit code $exit). Is the tool installed? Run 'dotnet tool restore' from the repo root and retry."
+    }
     if ($exit -ne 0) {
         $bad = @($parsed | Where-Object { $_.PSObject.Properties['ValidationErrors'] -and $_.ValidationErrors })
         Write-Host "DISALLOWED LICENCES FOUND:" -ForegroundColor Red

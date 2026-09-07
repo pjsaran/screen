@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     One-command build for Captr: format check, licence gate, build, test, publish,
     and (optionally) installer — idempotent and loud on failure (SPEC §11).
@@ -38,7 +38,14 @@ try {
     $sln = Join-Path $RepoRoot 'Captr.slnx'
 
     Write-Host '== 1/7 Tools + FFmpeg =========================================' -ForegroundColor Cyan
-    dotnet tool restore | Out-Null
+    # If this checkout arrived as a zip/USB copy rather than a git clone, Windows tags
+    # every file "from another computer" (Mark of the Web). The .NET 10 SDK refuses to
+    # read a tagged tool manifest, so 'dotnet tool restore' silently installs nothing and
+    # the licence gate later crashes with no nuget-license tool. Unblock-File removes the
+    # tag and is a harmless no-op on a clean clone.
+    Unblock-File (Join-Path $RepoRoot 'dotnet-tools.json')
+    dotnet tool restore
+    if ($LASTEXITCODE -ne 0) { throw 'dotnet tool restore failed (see output above). The licence gate needs the nuget-license tool from dotnet-tools.json.' }
     & (Join-Path $PSScriptRoot 'fetch-ffmpeg.ps1')
 
     Write-Host '== 2/7 Licence gate ===========================================' -ForegroundColor Cyan

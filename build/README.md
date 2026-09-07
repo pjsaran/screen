@@ -49,5 +49,20 @@ installer's version and file name, and the build identity all derive from it.
 the pin changing, which defeats the checksum entirely. Always a dated
 `autobuild-*` release.
 
+## If the build fails on a machine you copied the repo to
+
+Symptom: step 1 prints `File ...\dotnet-tools.json came from another computer and
+might be blocked`, and the licence gate then reports that `nuget-license` produced
+no output. Cause: the repo arrived as a zip or USB copy, so Windows tagged every
+file "from the internet" (Mark of the Web), and the .NET SDK refuses to read a
+tagged tool manifest. `build.ps1` now unblocks the manifest itself; if you still hit
+it, run this once from the repo root and rebuild:
+
+```powershell
+Get-ChildItem -Recurse -File | Unblock-File
+```
+
+A `git clone` never carries the tag, so prefer cloning over copying.
+
 Full detail: [building](../docs/developer-guide/building.md) and
 [releasing](../docs/developer-guide/releasing.md).
