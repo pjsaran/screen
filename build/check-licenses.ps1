@@ -51,6 +51,14 @@ $buildTimeOnly = 'Microsoft.Windows.SDK.Win32Metadata;Microsoft.Windows.SDK.Win3
 
 Push-Location $RepoRoot
 try {
+    # --- 0. Restore first -----------------------------------------------------------
+    # nuget-license does not resolve packages itself; it reads each project's
+    # obj\project.assets.json, which only exists after a restore. On a fresh checkout
+    # there is none, and the tool fails with "Failed to get the project assets file".
+    # Restoring here keeps this script correct when run on its own, not just after a build.
+    dotnet restore $solution
+    if ($LASTEXITCODE -ne 0) { throw 'dotnet restore failed; the licence gate cannot read package assets without it.' }
+
     # --- 1+2. Validate: any package outside the allowed list fails the run ---------
     $jsonOut = & dotnet nuget-license -i $solution -t -a $allowed -ignore $buildTimeOnly -include-ignored -o JsonPretty 2>&1
     $exit = $LASTEXITCODE

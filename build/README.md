@@ -64,5 +64,10 @@ Get-ChildItem -Recurse -File | Unblock-File
 
 A `git clone` never carries the tag, so prefer cloning over copying.
 
+A related fresh-machine symptom: a wall of `Failed to get the project assets file`
+stack traces from the licence gate. That means no `obj\project.assets.json` exists
+yet. `check-licenses.ps1` now runs `dotnet restore` itself before the tool, so this
+should not recur; if it does, run `dotnet restore Captr.slnx` and rebuild.
+
 Full detail: [building](../docs/developer-guide/building.md) and
 [releasing](../docs/developer-guide/releasing.md).
