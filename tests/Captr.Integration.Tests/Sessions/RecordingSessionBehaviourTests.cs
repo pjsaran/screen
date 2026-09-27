@@ -126,8 +126,27 @@ public sealed class RecordingSessionBehaviourTests : IDisposable
 
         session.RebuildForNewTopology();
 
-        TopologyChanged change = Journal().OfType<TopologyChanged>().Last();
-        change.NewDisplays.Select(d => d.StableId).ShouldBe(["A"]);
+        Journal().OfType<TopologyChanged>().ShouldAllBe(change => change.NewDisplays.All(d => d.StableId == "A"));
+        string arguments = string.Join(' ', session.BuildRunSpec().PrimaryArguments);
+        CountOf(arguments, "ddagrab").ShouldBe(1, "display B stays excluded");
+    }
+
+    [Fact]
+    public void A_display_notification_that_changes_nothing_recorded_does_not_restart_the_encoder()
+    {
+        // Windows broadcasts "devices changed" for any USB device, and the event
+        // window hears broadcasts now. Each one used to start a new arrangement group:
+        // a restart, a gap, and a second output file, for nothing.
+        RecordingSession session = NewSession();
+
+        session.DisplaysDifferFromPlan().ShouldBeFalse();
+        session.RebuildForNewTopology();
+        Journal().OfType<TopologyChanged>().ShouldBeEmpty();
+
+        _displays[1] = _displays[1] with { Width = 2560, Height = 1440 };
+        session.DisplaysDifferFromPlan().ShouldBeTrue("a resolution change is a real change");
+        session.RebuildForNewTopology();
+        Journal().OfType<TopologyChanged>().ShouldHaveSingleItem().NewArrangementGroup.ShouldBe(2);
     }
 
     [Fact]

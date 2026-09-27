@@ -621,6 +621,13 @@ public sealed class RecordingSession : IRecordingSession
                     break;
                 case SessionCommand.Resume:
                     break; // Not paused — nothing to resume.
+                case SessionCommand.TopologyChanged when !DisplaysDifferFromPlan():
+                    // Windows broadcasts "devices changed" for every USB stick and
+                    // headset, and "display changed" for things that change nothing we
+                    // record. Once the event window could hear broadcasts at all, each
+                    // one restarted the encoder into a new arrangement group - a new
+                    // output file and a gap, for nothing. Only a real change interrupts.
+                    break;
                 default:
                     // Stop, Pause, Suspend, TopologyChanged, ReduceFrameRate, and
                     // ApplyDegradation all need the encoder stopped first.
@@ -702,6 +709,20 @@ public sealed class RecordingSession : IRecordingSession
         }
     }
 
+    /// <summary>
+    /// True when the displays that would be recorded now differ from the ones being
+    /// recorded: one added or removed, or a size, position, or output index changed.
+    /// </summary>
+    internal bool DisplaysDifferFromPlan()
+    {
+        IReadOnlyList<CaptureSource> now = ResolveSources(_enumerateDisplays());
+        return !now.SequenceEqual(_plan.Sources);
+    }
+
+    private IReadOnlyList<CaptureSource> ResolveSources(IReadOnlyList<DisplayInfo> displays) =>
+        [.. DisplaySelection.Resolve(displays, CurrentExcludedDisplayIds, []).Included
+            .Select(d => new CaptureSource(d.DxgiOutputIndex, d.Width, d.Height, d.VirtualX, d.VirtualY))];
+
     internal void RebuildForNewTopology()
     {
         // Re-resolve stable identities to fresh indices (SPEC §5/§6) against the
@@ -722,6 +743,13 @@ public sealed class RecordingSession : IRecordingSession
 
             _waitingForDisplays = true;
             return;
+        }
+
+        IReadOnlyList<CaptureSource> sources = [.. stillWanted.Select(d =>
+            new CaptureSource(d.DxgiOutputIndex, d.Width, d.Height, d.VirtualX, d.VirtualY))];
+        if (!_waitingForDisplays && sources.SequenceEqual(_plan.Sources))
+        {
+            return; // Nothing we record changed: same group, no new segment.
         }
 
         _waitingForDisplays = false;
