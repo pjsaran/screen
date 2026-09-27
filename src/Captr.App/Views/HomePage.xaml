@@ -74,6 +74,31 @@
 
         <!-- ==== Messages: only present when there is something to say =========== -->
         <StackPanel Grid.Row="2">
+            <!-- First run: where recordings go, and a way to prove it all works. -->
+            <Border Style="{StaticResource Card}" Padding="12,10"
+                    Visibility="{Binding ShowFirstRun, Converter={StaticResource BoolToVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="{Binding FirstRunFolderText}" Style="{StaticResource BodyText}" TextWrapping="Wrap" />
+                    <TextBlock Style="{StaticResource CaptionText}" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Text="Try a 10-second test recording to check that capture, the encoder and saving all work on this PC." />
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <ui:Button Content="Record a test" Appearance="Primary" Command="{Binding RecordTestCommand}"
+                                   AutomationProperties.Name="Record a 10-second test recording" />
+                        <ui:Button Content="Open folder" Margin="6,0,0,0" Command="{Binding OpenWorkingFolderCommand}"
+                                   AutomationProperties.Name="Open the folder recordings are saved to" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" Padding="12,10"
+                    Visibility="{Binding TestRecordingText, Converter={StaticResource NonEmptyToVisibility}}">
+                <TextBlock Text="{Binding TestRecordingText}" Style="{StaticResource BodyText}" TextWrapping="Wrap"
+                           AutomationProperties.LiveSetting="Polite" />
+            </Border>
+            <Border Style="{StaticResource Card}" Padding="12,10"
+                    Visibility="{Binding TransferLine, Converter={StaticResource NonEmptyToVisibility}}">
+                <TextBlock Text="{Binding TransferLine}" Style="{StaticResource CaptionText}" TextWrapping="Wrap"
+                           AutomationProperties.LiveSetting="Polite" />
+            </Border>
             <Border Style="{StaticResource Card}" Padding="12,10"
                     Background="{StaticResource CautionTintBrush}"
                     BorderBrush="{StaticResource CautionEdgeBrush}"

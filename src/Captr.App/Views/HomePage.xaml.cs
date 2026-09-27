@@ -29,7 +29,11 @@ public partial class HomePage : Page, IPageLifecycle, IDisposable
         InitializeComponent();
 
         _previewTimer = new DispatcherTimer { Interval = PreviewInterval };
-        _previewTimer.Tick += (_, _) => _viewModel.RefreshDisplays();
+        _previewTimer.Tick += (_, _) =>
+        {
+            _viewModel.RefreshDisplays();
+            _ = _viewModel.RefreshSurroundingsAsync();
+        };
         Loaded += (_, _) => OnEntering();
         Unloaded += (_, _) => OnLeaving();
     }
@@ -38,6 +42,7 @@ public partial class HomePage : Page, IPageLifecycle, IDisposable
     public void OnEntering()
     {
         _viewModel.RefreshDisplays();
+        _ = _viewModel.RefreshSurroundingsAsync();
         _previewTimer.Start();
     }
 

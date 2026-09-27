@@ -5,9 +5,13 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 using Captr.App.Services;
+using Captr.Core.Common;
 using Captr.Core.Displays;
 using Captr.Core.Encoders;
 using Captr.Core.Ipc;
+using Captr.Core.Sessions;
+using Captr.Core.Settings;
+using Captr.Core.Transfers;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -37,6 +41,34 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string _stateText = "Idle";
+
+    /// <summary>
+    /// True until the first recording exists: Home then says where recordings go and
+    /// offers a short test. There was no first-run guidance at all - the working
+    /// folder was shown nowhere while idle, and the first Start spent several silent
+    /// seconds proving an encoder.
+    /// </summary>
+    [ObservableProperty]
+    private bool _showFirstRun;
+
+    [ObservableProperty]
+    private string _firstRunFolderText = "";
+
+    /// <summary>Progress and outcome of the test recording, in words.</summary>
+    [ObservableProperty]
+    private string _testRecordingText = "";
+
+    [ObservableProperty]
+    private bool _isTestRunning;
+
+    /// <summary>One line about transfers still moving or stuck; empty when there is
+    /// nothing to say. See <see cref="TransferDigest"/>.</summary>
+    [ObservableProperty]
+    private string _transferLine = "";
+
+    private string _workingFolder = "";
+
+    private TransferQueue? _transferQueue;
 
     /// <summary>The last recording ended on its own and nobody has acknowledged it yet.</summary>
     [ObservableProperty]
@@ -208,6 +240,109 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
     /// <summary>Acknowledges a failed recording; the page returns to idle.</summary>
     [RelayCommand]
     private void DismissFailure() => _host.DismissFailure();
+
+    /// <summary>
+    /// Re-reads the two things Home shows that are not in the recorder's status:
+    /// whether any recording exists yet, and the transfer queue's one line. Called
+    /// with the preview refresh; cheap, and every failure just leaves the old text.
+    /// </summary>
+    public async Task RefreshSurroundingsAsync()
+    {
+        try
+        {
+            string folder = new SettingsStore().Load().WorkingFolder;
+            bool anyRecording = await Task.Run(() =>
+                Directory.Exists(folder)
+                && Directory.EnumerateFiles(folder, SessionJournal.FileName, SearchOption.AllDirectories).Any()).ConfigureAwait(true);
+            _workingFolder = folder;
+            FirstRunFolderText = "Recordings are saved to " + folder + ".";
+            ShowFirstRun = !anyRecording && !IsRecording;
+
+            string line = await Task.Run(() =>
+                TransferDigest.Describe((_transferQueue ??= new TransferQueue()).ListRecent(DateTimeOffset.UtcNow))).ConfigureAwait(true);
+            TransferLine = line;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                               or Microsoft.Data.Sqlite.SqliteException)
+        {
+            // Home is a status page; a folder or queue that cannot be read right now
+            // keeps what it showed last rather than showing an error of its own.
+        }
+    }
+
+    [RelayCommand]
+    private void OpenWorkingFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(_workingFolder);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", _workingFolder) { UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                               or System.ComponentModel.Win32Exception or ArgumentException)
+        {
+            TestRecordingText = "The folder could not be opened: " + exception.Message;
+        }
+    }
+
+    /// <summary>
+    /// Records for ten seconds with the label "test" and says how it went: proof, on
+    /// a new PC, that capture, the encoder and finalising all work - before the first
+    /// recording that matters.
+    /// </summary>
+    [RelayCommand]
+    private async Task RecordTestAsync()
+    {
+        IsTestRunning = true;
+        LastError = "";
+        TestRecordingText = "Starting… the first recording on this PC checks which encoder works, which takes a few seconds.";
+        try
+        {
+            StartResponse started = await _host.RequestAsync<StartResponse>(
+                IpcKinds.Start, new StartRequest(null, null, null, "test"), startHostIfNeeded: true, CancellationToken.None);
+            if (started.AlreadyRecording)
+            {
+                TestRecordingText = "A recording is already running, so no test was made.";
+                return;
+            }
+
+            TestRecordingText = "Recording a 10-second test…";
+            await Task.Delay(TimeSpan.FromSeconds(10));
+            string encoder = _host.LatestStatus.Encoder ?? "the encoder";
+            await _host.RequestAsync<StopResponse>(IpcKinds.Stop, null, startHostIfNeeded: false, CancellationToken.None);
+
+            TestRecordingText = "Saving the test recording…";
+            DateTime giveUp = DateTime.UtcNow.AddMinutes(2);
+            while (StatusPresentation.IsActive(_host.LatestStatus.State) && DateTime.UtcNow < giveUp)
+            {
+                await Task.Delay(500);
+            }
+
+            if (_host.LatestStatus.State == StatusPresentation.Failed)
+            {
+                TestRecordingText = "The test recording failed: " + StatusPresentation.DescribeFailure(_host.LatestStatus);
+                return;
+            }
+
+            RecordingSummary? test = RecordingCatalog.TryDescribe(
+                Directory.EnumerateDirectories(_workingFolder).Where(folder => folder.EndsWith(started.SessionId.ToString("N")[..8], StringComparison.OrdinalIgnoreCase))
+                    .FirstOrDefault() ?? "");
+            TestRecordingText = test is { Finalized: true }
+                ? $"Test recording OK: {test.RecordedSpan.TotalSeconds:F0} s with {encoder}, {ByteSize.Format(test.TotalBytes)}. " +
+                  "It is on the Recordings page; delete it there when you have looked."
+                : "The test recording was made but is still being saved. Check the Recordings page in a moment.";
+            await RefreshSurroundingsAsync();
+        }
+        catch (Exception exception) when (exception is HostUnreachableException or IpcRequestException
+                                               or ProtocolMismatchException or IOException)
+        {
+            TestRecordingText = "The test recording could not be made: " + exception.Message;
+        }
+        finally
+        {
+            IsTestRunning = false;
+        }
+    }
 
     [RelayCommand]
     private Task PauseAsync() => RunSimpleAsync(IpcKinds.Pause);
