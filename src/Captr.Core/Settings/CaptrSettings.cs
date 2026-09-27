@@ -88,9 +88,7 @@ public sealed record CaptrSettings
     public static CaptrSettings CreateDefault() => new() { SchemaVersion = CurrentSchemaVersion };
 
     private static string DefaultWorkingFolder() =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Captr", "Sessions");
+        Path.Combine(Common.CaptrPaths.DataRoot, "Sessions");
 }
 
 /// <summary>

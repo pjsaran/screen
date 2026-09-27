@@ -37,9 +37,7 @@ public sealed class EncoderCache
 
     /// <summary>Production cache in local application data.</summary>
     public EncoderCache()
-        : this(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Captr", "encoder-cache.json"))
+        : this(Path.Combine(Common.CaptrPaths.DataRoot, "encoder-cache.json"))
     {
     }
 

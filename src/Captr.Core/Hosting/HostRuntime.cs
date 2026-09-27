@@ -42,7 +42,8 @@ public sealed class HostRuntime
         // the usual reason is a previous host in the middle of its idle exit, and a
         // client that spawned this one because the old one had stopped answering
         // would otherwise poll for a minute and report "did not begin answering".
-        using var singleInstance = new Mutex(initiallyOwned: false, @"Local\CaptrHost");
+        using var singleInstance = new Mutex(
+            initiallyOwned: false, @"Local\CaptrHost" + (Common.CaptrPaths.InstanceSuffix is { } suffix ? "-" + suffix : ""));
         bool acquired;
         try
         {
@@ -167,8 +168,7 @@ public sealed class HostRuntime
     /// secrets module — never at call sites.</summary>
     private static ILogger CreateLogger()
     {
-        string logFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Captr", "logs");
+        string logFolder = Common.CaptrPaths.Logs;
         Directory.CreateDirectory(logFolder);
 
         Log.Logger = new LoggerConfiguration()

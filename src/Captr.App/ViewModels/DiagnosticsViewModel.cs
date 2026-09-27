@@ -53,8 +53,7 @@ public sealed partial class DiagnosticsViewModel : ObservableObject
     /// <summary>Where Captr keeps each kind of file on this machine.</summary>
     public ObservableCollection<StorageLocation> Locations { get; } = [];
 
-    private static string LogFolder => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Captr", "logs");
+    private static string LogFolder => Captr.Core.Common.CaptrPaths.Logs;
 
     public DiagnosticsViewModel() => _ = RefreshAsync();
 

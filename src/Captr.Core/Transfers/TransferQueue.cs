@@ -129,8 +129,7 @@ public sealed class TransferQueue
     /// </summary>
     private static string DefaultDatabasePath()
     {
-        string folder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Captr");
+        string folder = Common.CaptrPaths.DataRoot;
         string current = Path.Combine(folder, "transfers.db");
         string legacy = Path.Combine(folder, "delivery.db");
 

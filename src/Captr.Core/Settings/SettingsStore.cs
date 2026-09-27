@@ -249,6 +249,7 @@ public sealed class SettingsStore
         // Only ever touches the production location. A test store points somewhere
         // else entirely and must not inherit whatever this machine happens to have.
         if (!string.Equals(_settingsPath, DefaultSettingsPath(), StringComparison.OrdinalIgnoreCase)
+            || Common.CaptrPaths.IsRelocated
             || File.Exists(_settingsPath))
         {
             return;
@@ -347,9 +348,7 @@ public sealed class SettingsStore
     /// between machines, where the user chooses what applies.
     /// </remarks>
     public static string DefaultSettingsPath() =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Captr", "settings.json");
+        Path.Combine(Common.CaptrPaths.DataRoot, "settings.json");
 }
 
 /// <summary>Raised when settings fail validation; carries every field error so the

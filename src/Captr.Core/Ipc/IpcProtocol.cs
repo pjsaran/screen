@@ -51,6 +51,9 @@ public static class IpcProtocol
         // A short stable hash keeps the name well under the pipe-name length cap.
         byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sid));
         string name = "captr-host-" + Convert.ToHexStringLower(hash)[..16];
+
+        // A relocated Captr (CAPTR_DATA_ROOT) gets a recorder of its own; see CaptrPaths.
+        instanceSuffix ??= Common.CaptrPaths.InstanceSuffix;
         return instanceSuffix is null ? name : name + "-" + instanceSuffix;
     }
 

@@ -55,8 +55,7 @@ public static class HealthReport
     /// "open the folder and look" case that no amount of reporting replaces.</summary>
     public static IReadOnlyList<StorageLocation> Locations()
     {
-        string appData = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Captr");
+        string appData = CaptrPaths.DataRoot;
 
         string workingFolder;
         try

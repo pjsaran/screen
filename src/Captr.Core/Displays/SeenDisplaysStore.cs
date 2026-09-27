@@ -19,9 +19,7 @@ public sealed class SeenDisplaysStore
 
     /// <summary>Production store in local application data.</summary>
     public SeenDisplaysStore()
-        : this(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Captr", "seen-displays.json"))
+        : this(Path.Combine(Common.CaptrPaths.DataRoot, "seen-displays.json"))
     {
     }
 

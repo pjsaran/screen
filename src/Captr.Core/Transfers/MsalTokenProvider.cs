@@ -95,7 +95,7 @@ public sealed class MsalTokenProvider : IAccessTokenProvider
         // DPAPI-protected on-disk token cache (SPEC §7).
         var cacheProperties = new StorageCreationPropertiesBuilder(
                 "captr-msal-cache.bin",
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Captr"))
+                Common.CaptrPaths.DataRoot)
             .Build();
         MsalCacheHelper cacheHelper = await MsalCacheHelper.CreateAsync(cacheProperties).ConfigureAwait(false);
         cacheHelper.RegisterCache(app.AppTokenCache);
