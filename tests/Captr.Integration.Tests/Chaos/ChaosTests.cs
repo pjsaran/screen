@@ -131,10 +131,10 @@ public class ChaosTests : IDisposable
         // promptly instead of hanging or crashing the host (SPEC §13 rule 3).
         using var session = new Supervision.SupervisionTestSession();
         var supervisor = new EncoderSupervisor(session.FfmpegPath, session.Journal, Logger.None);
-        using var safety = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        using var stop = new CancellationTokenSource();
         Task<SupervisionOutcome> run = supervisor.RunAsync(
             new EncoderRunSpec(session.LavfiArguments(2), session.LavfiArguments(2), session.WorkingFolder),
-            null, safety.Token);
+            null, stop.Token);
 
         await WaitForLivePidAsync(session, 1);
         await Task.Delay(2000, TestContext.Current.CancellationToken);
@@ -155,11 +155,25 @@ public class ChaosTests : IDisposable
             }
         }
 
-        SupervisionOutcome outcome = await run; // safety token bounds this
-        // Loud failure OR graceful survival are both acceptable outcomes; a hang
-        // (safety cancellation → StoppedGracefully with nothing recorded) is not
-        // distinguishable here, so assert the strongest common guarantee: it ended.
-        outcome.ShouldNotBeNull();
+        // Two acceptable endings: supervision gives up LOUDLY on its own, or it
+        // survives (the open files outlived the delete) and still obeys a stop at
+        // once. What is not acceptable is a hang. The old assertion - "the outcome
+        // is not null" - held even when a three-minute safety cancellation was the
+        // only thing that ended the run.
+        Task first = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken));
+        bool survived = first != run;
+        if (survived)
+        {
+            await stop.CancelAsync();
+        }
+
+        SupervisionOutcome outcome = await run.WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
+        outcome.Kind.ShouldBe(survived ? SupervisionEndKind.StoppedGracefully : SupervisionEndKind.FailedLoudly,
+            outcome.FailureReason);
+        if (!survived)
+        {
+            outcome.FailureReason.ShouldNotBeNullOrWhiteSpace("a loud failure says why");
+        }
     }
 
     private static async Task<int> WaitForLivePidAsync(Supervision.SupervisionTestSession session, int launchNumber)
