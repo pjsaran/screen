@@ -71,16 +71,40 @@ The tray icon **blinks** the whole time a recording is running — that is the s
 and it is deliberately hard to miss. A still icon means Captr is installed and idle,
 not recording.
 
-Two things do NOT blink, on purpose:
+Some states do NOT blink, on purpose:
 
-- **Stopping and finalising** hold the bright icon steady. Captr is still working —
-  joining segments and hashing them — and the recording is not finished until it
-  goes idle. "Still busy" should never look like "still recording".
+- **Starting, stopping, and finalising** hold the bright icon steady. While starting,
+  Captr is checking the displays and, on a new PC, which encoder works; while
+  stopping and finalising it is joining segments and hashing them, and the recording
+  is not finished until it goes idle. "Still busy" should never look like "still
+  recording".
 - **Paused** has its own icon, plus a reminder every five minutes.
+- **Suspended** — the PC went to sleep during a recording — shows the paused icon.
+  The time asleep is a gap, and recording carries on when the PC wakes.
+
+The same states are named everywhere Captr shows one: on Home, in the strip at the
+bottom of the window's left rail, and in the tray tooltip.
 
 If you cannot see the icon at all, Windows has probably tucked it into the
 notification-area overflow: click the `^` chevron by the clock and drag the Captr
 icon onto the taskbar to keep it visible.
+
+## When a recording stops on its own
+
+A recording that stops without anyone asking — the encoder failed repeatedly, or
+the disk was nearly full — is **not** shown as idle. Until you acknowledge it:
+
+- **Home** says "Recording stopped" with the reason in plain words, and a
+  **Dismiss** button;
+- the strip at the bottom of the rail says "Stopped — Needs attention";
+- the tray icon shows the error icon, and a tray notification ("Captr stopped
+  recording", with the reason) appears once.
+
+This stays on screen even after the background recorder has exited, until you press
+Dismiss or start another recording, so it cannot be missed by looking away for the
+second it lasted. Everything recorded before the stop is saved; open **Recordings**
+to check it. `captr status` reports the same thing — see the
+[command line](command-line.md).
 
 ## Pausing
 
@@ -95,6 +119,15 @@ reminder is much cheaper than discovering it later.
 
 Each recording gets its own folder under the working folder
 (`%LOCALAPPDATA%\Captr\Sessions` by default; change it in **Settings → Files**).
+
+**Each recording's folder is private to the person recording.** Captr creates it
+with its own access list — you, SYSTEM, and the Administrators group, nobody else —
+so it stays private even when the working folder is somewhere every account can
+reach, such as `D:\Recordings` or the root of a drive. Other accounts on the PC can
+neither watch nor alter it. The working folder itself, and any folder that already
+existed, keep whatever permissions you gave them. On the rare network share that
+will not accept the list, the folder is created as before rather than the recording
+being refused.
 
 Inside, alongside the finished `.mkv`, you will find:
 
@@ -119,12 +152,12 @@ This is the part Captr is actually built around.
 | Captr's own background process is killed | The encoder keeps writing. The next start adopts the orphan, stops it cleanly, and finalises everything that reached disk. |
 | The machine loses power | The next start finds the unfinalised recording, repairs any truncated segment, and assembles the rest. You lose the encoder's last output buffer — seconds. |
 | A segment is corrupt at its tail | It is repaired by re-wrapping it; the original is kept until the repair is verified. |
-| The disk gets low | You are warned in minutes-remaining. Below five minutes, Captr stops cleanly and finalises rather than being cut off. A reserved half-gigabyte is released so there is always room to finish. |
+| The disk gets low | You are warned in minutes-remaining. Below five minutes, Captr stops cleanly and finalises rather than being cut off, and shows the recording as [stopped on its own](#when-a-recording-stops-on-its-own). A reserved half-gigabyte is released so there is always room to finish, and the space that assembling the finished file needs is counted in advance. If there is still not room to assemble it, every segment is kept as it is and Captr finishes the job once space is freed — the next time it starts, or at once with `captr recover`. |
 | A display is unplugged, added, or rearranged | The recording rolls to a new layout and carries on. |
 | The machine sleeps | The segment is closed and flushed before suspend, and a new one starts on resume. The sleep is a recorded gap. |
 | You lock the screen | Recording continues. Locking is not an interruption. |
 | Windows shuts down | Shutdown is blocked briefly, with a reason on screen, long enough to finalise. |
-| The GPU encoder fails repeatedly | It falls back to the CPU encoder once, and says so. It never falls back to a different capture method. |
+| The GPU encoder fails repeatedly | It falls back to the CPU encoder once, and says so. It never falls back to a different capture method. If the CPU encoder fails repeatedly too, the recording stops loudly and is shown as [stopped on its own](#when-a-recording-stops-on-its-own). |
 
 Captr never reports a recording as continuous when it is not. If there is a gap,
 you will see it on Home while it is happening and in the recording's integrity
@@ -134,12 +167,15 @@ record afterwards.
 
 **Settings → Files → Keep local copies for (days).**
 
-Local files are deleted only when **all** of these are true:
+A recording's folder is deleted automatically only when **all** of these are true:
 
-1. The retention period has passed.
-2. Every enabled destination has confirmed the transfer.
-3. Disk space is actually short.
+1. The recording was finalised.
+2. The retention period has passed since it was finalised.
+3. It has been transferred at least once, and **every** transfer of it has
+   completed and been verified. One that is queued, retrying, stopped, refused, or
+   waiting for sign-in keeps the whole folder.
 
 A recording that exists nowhere else is never deleted automatically, whatever the
 retention setting says — including when you have no destinations at all. Deleting
-those is your decision, from the Recordings page, with the typed confirmation.
+those is your decision, from the Recordings page, with the typed confirmation. A
+recording that is still being written cannot be deleted at all.
