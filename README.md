@@ -46,7 +46,9 @@ offer](docs/ffmpeg-source-offer.md).
 ## Building from source
 
 Windows 10/11 x64, the .NET 10 SDK, PowerShell 7, and git. Nothing else — the build
-fetches FFmpeg and Inno Setup itself, pinned and checksum-verified.
+fetches FFmpeg, Inno Setup, and the code-signing tool itself, pinned and
+checksum-verified. It builds unsigned without a certificate (with a warning); a
+release must be signed — see [releasing](docs/developer-guide/releasing.md).
 
 ```powershell
 pwsh build/build.ps1                        # licence gate, format, build, tests
