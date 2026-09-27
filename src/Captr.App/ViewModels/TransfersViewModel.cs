@@ -43,7 +43,24 @@ public sealed partial class TransfersViewModel : ObservableObject
     /// TransferQueue opens a connection and (the first time in the process) loads
     /// native SQLite; this page refreshes every three seconds.
     /// </summary>
-    private readonly TransferQueue _queue = new();
+    /// <remarks>
+    /// Opened on the first refresh, inside its error handling. It was a field
+    /// initialiser, run while the main window was being built, so a locked or damaged
+    /// transfers.db stopped Captr's window from opening at all.
+    /// </remarks>
+    private TransferQueue? _queue;
+
+    /// <summary>True while a refresh is running; the three-second timer skips a tick
+    /// rather than stacking refreshes behind a slow read (a VACUUM, a busy disk).</summary>
+    private bool _refreshing;
+
+    /// <summary>
+    /// Why the last Retry or Stop did not happen. Separate from <see cref="Message"/>,
+    /// which every refresh rewrites: the error used to be cleared by the refresh that
+    /// followed the click, so it was never on screen long enough to read.
+    /// </summary>
+    [ObservableProperty]
+    private string _actionError = "";
 
     /// <summary>False until the first read of the queue has finished. The empty-state
     /// message is held back until then — announcing "nothing has been transferred yet"
@@ -90,6 +107,12 @@ public sealed partial class TransfersViewModel : ObservableObject
     [RelayCommand]
     public async Task RefreshAsync()
     {
+        if (_refreshing)
+        {
+            return;
+        }
+
+        _refreshing = true;
         try
         {
             RetrySettings retries = LoadRetrySettings();
@@ -97,14 +120,10 @@ public sealed partial class TransfersViewModel : ObservableObject
             // the page is for what is happening and what just happened, not an
             // archive of every recording the machine has ever sent.
             IReadOnlyList<TransferItem> items = await Task.Run(
-                () => _queue.ListRecent(DateTimeOffset.UtcNow)).ConfigureAwait(true);
+                () => (_queue ??= new TransferQueue()).ListRecent(DateTimeOffset.UtcNow)).ConfigureAwait(true);
             _loaded = true;
 
-            Transfers.Clear();
-            foreach (TransferItem item in items)
-            {
-                Transfers.Add(new TransferRow(item, retries));
-            }
+            Synchronise([.. items.Select(item => new TransferRow(item, retries))]);
 
             CompletedCount = Transfers.Count(t => t.Severity == TransferSeverity.Done);
             InProgressCount = Transfers.Count(t => t.Severity == TransferSeverity.Active);
@@ -123,9 +142,61 @@ public sealed partial class TransfersViewModel : ObservableObject
                 : "Nothing has been transferred yet.\nFinished recordings appear here once at least one " +
                   "destination is set up in Settings.";
         }
-        catch (Exception exception) when (exception is IOException or Microsoft.Data.Sqlite.SqliteException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                               or Microsoft.Data.Sqlite.SqliteException)
         {
-            Message = "The transfer queue could not be read: " + exception.Message;
+            Message = "The transfer list could not be read: " + exception.Message +
+                      " Recordings are not affected. If this persists, export a support bundle from Diagnostics.";
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+    }
+
+    /// <summary>
+    /// Brings the rows up to date IN PLACE: unchanged rows stay the same objects, a
+    /// changed row is replaced where it stands. Clearing and rebuilding the list every
+    /// three seconds took keyboard focus and the screen reader's place with it.
+    /// </summary>
+    private void Synchronise(IReadOnlyList<TransferRow> latest)
+    {
+        HashSet<long> ids = [.. latest.Select(row => row.Id)];
+        for (int i = Transfers.Count - 1; i >= 0; i--)
+        {
+            if (!ids.Contains(Transfers[i].Id))
+            {
+                Transfers.RemoveAt(i);
+            }
+        }
+
+        for (int i = 0; i < latest.Count; i++)
+        {
+            int at = -1;
+            for (int j = i; j < Transfers.Count; j++)
+            {
+                if (Transfers[j].Id == latest[i].Id)
+                {
+                    at = j;
+                    break;
+                }
+            }
+
+            if (at < 0)
+            {
+                Transfers.Insert(i, latest[i]);
+                continue;
+            }
+
+            if (at != i)
+            {
+                Transfers.Move(at, i);
+            }
+
+            if (!Transfers[i].Equals(latest[i]))
+            {
+                Transfers[i] = latest[i];
+            }
         }
     }
 
@@ -193,11 +264,13 @@ public sealed partial class TransfersViewModel : ObservableObject
         {
             await _host.RequestAsync<StateResponse>(
                 kind, payload, startHostIfNeeded: true, CancellationToken.None);
+            ActionError = "";
             return true;
         }
-        catch (Exception exception) when (exception is HostUnreachableException or IpcRequestException)
+        catch (Exception exception) when (exception is HostUnreachableException or IpcRequestException
+                                               or ProtocolMismatchException)
         {
-            Message = exception.Message;
+            ActionError = exception.Message;
             return false;
         }
     }

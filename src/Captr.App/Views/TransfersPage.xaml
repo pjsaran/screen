@@ -234,6 +234,15 @@
                        HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
                        MaxWidth="420"
                        Visibility="{Binding Message, Converter={StaticResource NonEmptyToVisibility}}" />
+
+            <!-- Why the last Retry or Stop did not happen; stays until the next one works. -->
+            <Border Style="{StaticResource Card}" Padding="12,10" VerticalAlignment="Top"
+                    Background="{StaticResource CriticalTintBrush}"
+                    BorderBrush="{StaticResource CriticalEdgeBrush}"
+                    Visibility="{Binding ActionError, Converter={StaticResource NonEmptyToVisibility}}">
+                <TextBlock Text="{Binding ActionError}" Style="{StaticResource ErrorText}"
+                           AutomationProperties.LiveSetting="Assertive" />
+            </Border>
         </Grid>
     </Grid>
 </Page>
