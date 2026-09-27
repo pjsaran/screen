@@ -135,7 +135,11 @@ public sealed class FfmpegIntegrityTests : IDisposable
         // Recovery adopts (and then stops) the encoder a crashed host left running,
         // identified from the session journal - a file in the working folder. A
         // journal naming some other running program had THAT program killed.
-        using var bystander = Process.Start(new ProcessStartInfo("ping", ["-n", "30", "127.0.0.1"])
+        // Started by full path and identified by that path: reading MainModule straight
+        // after Process.Start can find no module loaded yet, which made this test fail
+        // now and then with a NullReferenceException.
+        string bystanderImage = Path.Combine(Environment.SystemDirectory, "PING.EXE");
+        using var bystander = Process.Start(new ProcessStartInfo(bystanderImage, ["-n", "30", "127.0.0.1"])
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -143,8 +147,6 @@ public sealed class FfmpegIntegrityTests : IDisposable
         })!;
         try
         {
-            string bystanderImage = bystander.MainModule!.FileName;
-
             FfmpegProcess? adopted = ProcessAdoption.TryAdopt(
                 bystander.Id, bystander.StartTime.ToUniversalTime(), bystanderImage,
                 bundledFfmpegPath: @"C:\Program Files\Captr\ffmpeg\ffmpeg.exe");
