@@ -39,6 +39,11 @@
     Build, package, and verify, but do not tag, push, or touch GitHub. Use this to
     rehearse a release.
 
+.PARAMETER AllowUnsigned
+    Publish even though no signing method is configured. For a private or throwaway
+    build only: without it, a release refuses to start unless signing is configured,
+    and fails if anything shipped is not signed, timestamped, and verified.
+
 .PARAMETER Full
     Include the hardware test categories (Display, Gpu, Soak) in step 3. Slower, and
     only meaningful on a machine with a real desktop and GPU.
@@ -60,6 +65,7 @@ param(
     [switch] $Draft,
     [switch] $SkipPublish,
     [switch] $Full,
+    [switch] $AllowUnsigned,
     [string] $RepoRoot = (Split-Path $PSScriptRoot -Parent)
 )
 
@@ -111,6 +117,25 @@ try {
         throw 'The working tree has uncommitted changes. Commit or stash them, then release.'
     }
 
+    # A published release is signed. This used to be a warning printed after the
+    # build, by which time nothing stopped an unsigned installer being tagged and
+    # published. Checked first, so a missing certificate costs seconds, not a build.
+    # A rehearsal (-SkipPublish) signs when it can and warns when it cannot.
+    $requireSigning = -not $SkipPublish -and -not $AllowUnsigned
+    if ($requireSigning) {
+        . (Join-Path $PSScriptRoot 'lib\Signing.ps1')
+        if (-not (Get-SigningConfig)) {
+            throw 'No code-signing method is configured, and a release must be signed. Set up Pfx, CertStore, ' +
+                  'or ArtifactSigning as described in docs/developer-guide/releasing.md, or pass -AllowUnsigned ' +
+                  'for a build nobody else will install.'
+        }
+
+        if (-not $env:CAPTR_SIGN_PUBLISHER) {
+            throw 'CAPTR_SIGN_PUBLISHER is not set. Set it to the certificate subject''s CN (for example "Contoso Ltd") ' +
+                  'so the release is verified against the publisher it must be signed by.'
+        }
+    }
+
     if (-not $SkipPublish -and -not (Get-Command gh -ErrorAction SilentlyContinue)) {
         throw 'The GitHub CLI (gh) is not installed. Install it, or pass -SkipPublish to build without releasing.'
     }
@@ -142,12 +167,12 @@ try {
 
     # ---- 3. Build and test -------------------------------------------------------
     Step '3/7 Build and test'
-    & (Join-Path $PSScriptRoot 'build.ps1') -Publish -Full:$Full
+    & (Join-Path $PSScriptRoot 'build.ps1') -Publish -Full:$Full -RequireSigning:$requireSigning
     if ($LASTEXITCODE -ne 0) { throw 'Build or tests failed; nothing has been tagged or published.' }
 
     # ---- 4. Installer ------------------------------------------------------------
     Step '4/7 Installer'
-    & (Join-Path $PSScriptRoot 'make-installer.ps1')
+    & (Join-Path $PSScriptRoot 'make-installer.ps1') -RequireSigning:$requireSigning
     if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
 
     # ---- 5. Verify what we are about to publish ----------------------------------
@@ -173,7 +198,11 @@ try {
     $sizeMb = [Math]::Round((Get-Item $setupExe).Length / 1MB, 1)
     Write-Host "  $(Split-Path $setupExe -Leaf)  $sizeMb MB  sha256:$actualHash"
     if (-not $recorded.signed) {
-        Write-Warning 'The installer is NOT signed. Set CAPTR_SIGN_PFX and CAPTR_SIGN_PASSWORD to sign it (see docs/developer-guide/releasing.md).'
+        if ($requireSigning) {
+            throw 'The artefacts did not verify as signed (see artifacts/signature-report.json). Nothing has been tagged or published.'
+        }
+
+        Write-Warning 'The installer is NOT signed. Configure signing as described in docs/developer-guide/releasing.md.'
     }
 
     if ($SkipPublish) {

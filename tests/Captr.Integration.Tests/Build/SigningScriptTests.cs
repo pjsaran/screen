@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
@@ -248,6 +249,45 @@ public sealed class SigningScriptTests : IDisposable
 
         exitCode.ShouldNotBe(0);
         output.ShouldContain("NOT RFC 3161");
+    }
+
+    [Fact]
+    public async Task A_release_without_signing_refuses_before_building_and_tags_nothing()
+    {
+        // new-release.ps1 used to warn about an unsigned installer AFTER the build and
+        // then tag, push, and publish it anyway.
+        string repo = Path.Combine(_dir, "repo");
+        Directory.CreateDirectory(repo);
+        await File.WriteAllTextAsync(Path.Combine(repo, "README.md"), "x", TestContext.Current.CancellationToken);
+        foreach (string[] git in new[]
+                 {
+                     new[] { "init", "-q" },
+                     ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "add", "."],
+                     ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "x"],
+                 })
+        {
+            using Process process = Process.Start(new ProcessStartInfo("git", ["-C", repo, .. git]) { UseShellExecute = false })!;
+            await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        }
+
+        (int exitCode, string output) = await BuildScriptHarness.RunAsync(
+            BuildScriptHarness.Script(@"build\new-release.ps1"), ["-RepoRoot", repo], NoSigningEnvironment());
+
+        exitCode.ShouldNotBe(0);
+        output.ShouldContain("No code-signing method is configured");
+        output.ShouldNotContain("3/7 Build", customMessage: "refused before spending a build on it");
+        using Process tags = Process.Start(new ProcessStartInfo("git", ["-C", repo, "tag", "--list"])
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+        })!;
+        (await tags.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken)).Trim().ShouldBeEmpty();
+
+        // git writes its objects read-only; the folder is deleted with the test's.
+        foreach (string file in Directory.EnumerateFiles(repo, "*", SearchOption.AllDirectories))
+        {
+            File.SetAttributes(file, FileAttributes.Normal);
+        }
     }
 
     [Fact]
