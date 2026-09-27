@@ -93,7 +93,7 @@ public sealed class RecoveryScanner
         }
 
         using FfmpegProcess? orphan = ProcessAdoption.TryAdopt(
-            launch.ProcessId, launch.ProcessStartTimeUtc, launch.ImagePath);
+            launch.ProcessId, launch.ProcessStartTimeUtc, launch.ImagePath, _pipeline.FfmpegPath);
         if (orphan is null)
         {
             return; // Already gone — the normal case after a reboot.

@@ -108,8 +108,18 @@ public sealed class SessionPlanner
         //    step: on the first recording for this machine and these settings it runs
         //    one trial encode; afterwards it is a cache read, which is what makes
         //    pressing Record feel instant.
-        string ffmpegPath = FfmpegLocator.FindFfmpeg();
-        string ffprobePath = FfmpegLocator.FindFfprobe();
+        string ffmpegPath;
+        string ffprobePath;
+        try
+        {
+            ffmpegPath = FfmpegLocator.FindFfmpeg();
+            ffprobePath = FfmpegLocator.FindFfprobe();
+        }
+        catch (IOException exception) when (exception is FileNotFoundException or FfmpegIntegrityException)
+        {
+            // Missing or not the pinned build: say so, instead of a bare exception.
+            throw new SessionStartException(exception.Message);
+        }
 
         // The SAME identity HealthReport uses when it re-derives the fingerprint for
         // the Diagnostics "Encoder" check. These two must agree or the check can

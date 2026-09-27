@@ -25,6 +25,10 @@ public sealed class FinalizationPipeline
     private readonly string _ffprobePath;
     private readonly ILogger _log;
 
+    /// <summary>The FFmpeg this pipeline runs — also the only executable recovery
+    /// will ever adopt as a surviving encoder.</summary>
+    public string FfmpegPath => _ffmpegPath;
+
     public FinalizationPipeline(string ffmpegPath, string ffprobePath, ILogger log)
     {
         _ffmpegPath = ffmpegPath;

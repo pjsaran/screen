@@ -142,7 +142,16 @@ public static class HealthReport
         try
         {
             string path = Supervision.FfmpegLocator.FindFfmpeg();
-            checks.Add(new("FFmpeg", HealthLevel.Ok, $"Found at {path}.", null));
+            Supervision.FfmpegLocator.FindFfprobe();
+            checks.Add(new("FFmpeg", HealthLevel.Ok, $"Found at {path}, and verified as the pinned build.", null));
+        }
+        catch (Supervision.FfmpegIntegrityException exception)
+        {
+            checks.Add(new(
+                "FFmpeg",
+                HealthLevel.Problem,
+                exception.Message,
+                "Captr will not record with it. Re-run the installer to restore the FFmpeg it ships."));
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {

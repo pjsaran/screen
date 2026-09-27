@@ -38,6 +38,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'lib\PeImageDigest.ps1')
 
 $lockPath  = Join-Path $PSScriptRoot 'ffmpeg.lock.json'
 $toolsDir  = Join-Path $RepoRoot 'tools\ffmpeg'
@@ -121,6 +122,17 @@ Remove-Item $extractDir -Recurse -Force
 
 $ffmpeg = Join-Path $binDir 'ffmpeg.exe'
 
+# Record what the pinned build IS, file by file, now - straight after its archive's
+# checksum was verified and before anything could touch the extracted copies. The
+# digest ignores an Authenticode signature (see build/lib/PeImageDigest.ps1), so it
+# still identifies these files after release signing. The application refuses to
+# run an ffmpeg.exe or ffprobe.exe that does not match (FfmpegLocator), and
+# Sign-Artifacts.ps1 refuses to sign one.
+$binaryDigests = [ordered]@{}
+foreach ($name in 'ffmpeg.exe', 'ffprobe.exe') {
+    $binaryDigests[$name] = Get-PeImageDigest (Join-Path $binDir $name)
+}
+
 # --- 4. Capability assertions -----------------------------------------------------
 Write-Host "Interrogating $ffmpeg"
 $filters  = & $ffmpeg -hide_banner -filters  2>$null | Out-String
@@ -171,6 +183,7 @@ $caps = [ordered]@{
     releaseTag       = $lock.releaseTag
     assetName        = $lock.assetName
     sha256           = $lock.sha256
+    binaryDigests    = $binaryDigests
     versionBanner    = $versionLine
     requiredFilters  = $lock.requiredFilters
     requiredEncoders = $lock.requiredEncoders

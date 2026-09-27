@@ -21,8 +21,22 @@ public static class ProcessAdoption
     /// reuses PIDs, and PID + start time is unique for the machine's uptime.</param>
     /// <param name="imagePath">Image path recorded at launch — guards against the
     /// astronomically unlucky case of a reused PID with a matching start time.</param>
-    public static FfmpegProcess? TryAdopt(int processId, DateTimeOffset processStartTimeUtc, string imagePath)
+    /// <param name="bundledFfmpegPath">The FFmpeg this installation runs. Only that
+    /// executable is ever adopted.</param>
+    /// <remarks>
+    /// All three recorded values come from the session's journal — a file in the
+    /// working folder. Checked only against each other, a journal that names some
+    /// other running program (planted, or simply damaged) had that program "adopted"
+    /// and killed. The process must now be Captr's own FFmpeg as well.
+    /// </remarks>
+    public static FfmpegProcess? TryAdopt(
+        int processId, DateTimeOffset processStartTimeUtc, string imagePath, string bundledFfmpegPath)
     {
+        if (!SamePath(imagePath, bundledFfmpegPath))
+        {
+            return null;
+        }
+
         Process candidate;
         try
         {
@@ -41,8 +55,7 @@ public static class ProcessAdoption
             bool startTimeMatches =
                 (candidateStart - processStartTimeUtc).Duration() < TimeSpan.FromSeconds(1);
 
-            bool imageMatches = string.Equals(
-                candidate.MainModule?.FileName, imagePath, StringComparison.OrdinalIgnoreCase);
+            bool imageMatches = candidate.MainModule?.FileName is { } actual && SamePath(actual, bundledFfmpegPath);
 
             if (startTimeMatches && imageMatches && !candidate.HasExited)
             {
@@ -57,5 +70,17 @@ public static class ProcessAdoption
 
         candidate.Dispose();
         return null;
+    }
+
+    private static bool SamePath(string a, string b)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 }
