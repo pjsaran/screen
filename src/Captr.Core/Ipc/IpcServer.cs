@@ -142,8 +142,9 @@ public sealed class IpcServer : IAsyncDisposable
                 {
                     await IpcProtocol.WriteAsync(pipe, IpcProtocol.Envelope(IpcKinds.Hello, new HelloResponse(
                         Accepted: false, IpcProtocol.Version, _hostVersion,
-                        $"Protocol version mismatch: client speaks {request?.ProtocolVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unknown"}, " +
-                        $"host speaks {IpcProtocol.Version}. Update the older side.")), cancellationToken).ConfigureAwait(false);
+                        IpcClient.OlderRecorderRunning + " (Protocol " +
+                        $"{request?.ProtocolVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unknown"} asked, " +
+                        $"{IpcProtocol.Version} spoken.)")), cancellationToken).ConfigureAwait(false);
                     return;
                 }
 

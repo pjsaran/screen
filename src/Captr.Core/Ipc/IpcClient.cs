@@ -60,8 +60,9 @@ public sealed class IpcClient : IAsyncDisposable
         }
 
         throw new HostUnreachableException(
-            "A recording host was started but did not begin answering within " +
-            $"{HostStartupTimeout.TotalSeconds:F0} seconds. Check the host log in %LOCALAPPDATA%\\Captr\\logs.");
+            $"Captr's recorder was started but did not answer within {HostStartupTimeout.TotalSeconds:F0} seconds. " +
+            "Try again; if it keeps happening, open Captr's Diagnostics page (or run 'captr doctor') " +
+            $"and export a support bundle. The recorder's log is in {Common.CaptrPaths.Logs}.");
     }
 
     private static async Task<IpcClient?> TryConnectOnceAsync(
@@ -122,6 +123,17 @@ public sealed class IpcClient : IAsyncDisposable
         return client;
     }
 
+    /// <summary>The recorder went away, or answered nonsense, part-way through.</summary>
+    private const string LostContact =
+        "Captr lost contact with its recorder part-way through. Try again; any recording in progress is not " +
+        "affected by this. If it keeps happening, open Diagnostics and export a support bundle.";
+
+    /// <summary>What a protocol mismatch means in practice: a recorder from before an
+    /// update is still running.</summary>
+    internal const string OlderRecorderRunning =
+        "A Captr recorder from a different version is still running, usually one from before an update. " +
+        "Quit Captr from the tray icon, wait a minute for the old recorder to finish, and open it again.";
+
     private static void StartDetachedHost(string? hostExecutablePath)
     {
         string exePath = hostExecutablePath
@@ -129,7 +141,8 @@ public sealed class IpcClient : IAsyncDisposable
         if (!File.Exists(exePath))
         {
             throw new HostUnreachableException(
-                $"Captr.App.exe was not found at {exePath}, so no recording host could be started.");
+                $"Captr's recorder (Captr.App.exe) is missing from {Path.GetDirectoryName(exePath)}, so nothing " +
+                "can be recorded. Reinstall Captr to put it back.");
         }
 
         // UseShellExecute = true is LOAD-BEARING, not a style choice.
@@ -165,14 +178,14 @@ public sealed class IpcClient : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
 
         IpcEnvelope? reply = await IpcProtocol.ReadAsync(_pipe, cancellationToken).ConfigureAwait(false)
-            ?? throw new HostUnreachableException("The host closed the connection during the handshake.");
+            ?? throw new HostUnreachableException(LostContact);
         HelloResponse response = reply.PayloadAs<HelloResponse>()
-            ?? throw new HostUnreachableException("The host's handshake reply was unreadable.");
+            ?? throw new HostUnreachableException(LostContact);
 
         if (!response.Accepted)
         {
             throw new ProtocolMismatchException(response.RefusalReason
-                ?? "The host refused the connection (protocol version mismatch).");
+                ?? OlderRecorderRunning);
         }
     }
 
@@ -184,7 +197,7 @@ public sealed class IpcClient : IAsyncDisposable
         await IpcProtocol.WriteAsync(_pipe, IpcProtocol.Envelope(kind, payload), cancellationToken).ConfigureAwait(false);
 
         IpcEnvelope reply = await IpcProtocol.ReadAsync(_pipe, cancellationToken).ConfigureAwait(false)
-            ?? throw new HostUnreachableException("The host closed the connection mid-request.");
+            ?? throw new HostUnreachableException(LostContact);
 
         if (reply.Kind == IpcKinds.Error)
         {

@@ -112,7 +112,7 @@ public sealed class HostConnection : IAsyncDisposable
             _clientVersion, startHostIfNeeded, null, cancellationToken).ConfigureAwait(false);
         if (client is null)
         {
-            throw new HostUnreachableException("No recording host is running.");
+            throw new HostUnreachableException("Nothing is recording right now.");
         }
 
         return await client.RequestAsync<TResponse>(kind, payload, cancellationToken).ConfigureAwait(false);
