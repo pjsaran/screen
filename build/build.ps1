@@ -93,12 +93,11 @@ try {
         # insists every class names a category; this makes a forgotten one run anyway.
         #   Published - needs publish/, so it runs after step 6 below.
         #   Installer - installs and uninstalls the product; run on purpose only.
-        #   Display/Gpu/Soak - need a real desktop, a GPU, and patience: -Full only.
+        #   Display/Gpu/Soak - need a real desktop, a GPU, and patience: -Full only,
+        #     and also after step 6, because several drive the published captr.exe.
         #     The soak's length comes from CAPTR_SOAK_MINUTES (default 6).
         $filter = if ($TestFilter) {
             $TestFilter
-        } elseif ($Full) {
-            'Category!=Published&Category!=Installer'
         } else {
             'Category!=Published&Category!=Installer&Category!=Display&Category!=Gpu&Category!=Soak'
         }
@@ -107,7 +106,9 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Integration tests failed.' }
     }
 
-    if ($Publish -or $Installer) {
+    # -Full runs the hardware tests, and several of those drive the published payload:
+    # they once ran BEFORE this step, against whatever publish/ an earlier run had left.
+    if ($Publish -or $Installer -or $Full) {
         Write-Host '== 6/7 Publish (self-contained win-x64) =======================' -ForegroundColor Cyan
         $pubDir = Join-Path $RepoRoot 'publish'
         if (Test-Path $pubDir) { Remove-Item $pubDir -Recurse -Force } # idempotent: no stale files
@@ -135,8 +136,9 @@ try {
         # The published payload exists only now, so the tests that drive it run
         # here rather than in step 5 with everything else.
         if (-not $SkipTests) {
-            Write-Host '   Published-payload tests (CLI contract) ---------------------' -ForegroundColor Cyan
-            dotnet test (Join-Path $RepoRoot 'tests\Captr.Integration.Tests') --configuration $Configuration --no-build --filter 'Category=Published'
+            $postPublish = if ($Full) { 'Category=Published|Category=Display|Category=Gpu|Category=Soak' } else { 'Category=Published' }
+            Write-Host "   Tests against the published payload ($postPublish) ---------" -ForegroundColor Cyan
+            dotnet test (Join-Path $RepoRoot 'tests\Captr.Integration.Tests') --configuration $Configuration --no-build --filter $postPublish
             if ($LASTEXITCODE -ne 0) { throw 'Published-payload tests failed.' }
         }
     }

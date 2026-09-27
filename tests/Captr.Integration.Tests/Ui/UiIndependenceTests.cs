@@ -15,20 +15,7 @@ namespace Captr.Integration.Tests.Ui;
 [Trait("Category", "Gpu")]
 public class UiIndependenceTests
 {
-    private static string PublishDirectory()
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Captr.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        directory.ShouldNotBeNull("could not locate the repo root");
-        string publish = Path.Combine(directory.FullName, "publish");
-        File.Exists(Path.Combine(publish, "captr.exe")).ShouldBeTrue(
-            $"No published payload at {publish}. Run: pwsh build/build.ps1 -Publish -SkipTests");
-        return publish;
-    }
+    private static string PublishDirectory() => PublishedPayload.Directory();
 
     [Fact]
     public async Task Killing_the_UI_mid_recording_does_not_interrupt_capture_and_relaunch_reattaches()

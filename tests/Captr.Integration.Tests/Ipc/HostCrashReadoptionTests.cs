@@ -30,20 +30,7 @@ namespace Captr.Integration.Tests.Ipc;
 [Trait("Category", "Gpu")]
 public class HostCrashReadoptionTests
 {
-    private static string PublishDirectory()
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Captr.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        directory.ShouldNotBeNull("could not locate the repo root");
-        string publish = Path.Combine(directory.FullName, "publish");
-        File.Exists(Path.Combine(publish, "captr.exe")).ShouldBeTrue(
-            $"No published payload at {publish}. Run: pwsh build/build.ps1 -Publish -SkipTests");
-        return publish;
-    }
+    private static string PublishDirectory() => PublishedPayload.Directory();
 
     [Fact]
     public async Task Killing_the_host_leaves_the_encoder_writing_and_the_next_host_reaps_and_finalises_it()

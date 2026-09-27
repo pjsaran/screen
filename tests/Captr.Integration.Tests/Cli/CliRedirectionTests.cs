@@ -25,20 +25,7 @@ public class CliRedirectionTests
     /// captr.exe and Captr.App.exe share one folder. Testing the shipped layout is
     /// also the point — the bug this guards was invisible until then.
     /// </summary>
-    private static string CliPath()
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Captr.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        directory.ShouldNotBeNull("could not locate the repo root");
-        string cli = Path.Combine(directory.FullName, "publish", "captr.exe");
-        File.Exists(cli).ShouldBeTrue(
-            $"No published payload at {cli}. Run: pwsh build/build.ps1 -Publish -SkipTests");
-        return cli;
-    }
+    private static string CliPath() => PublishedPayload.Cli();
 
     /// <summary>Runs the CLI with output redirected, failing if it does not return
     /// promptly — the exact shape a scheduled task uses.</summary>

@@ -23,19 +23,7 @@ namespace Captr.Integration.Tests.Cli;
 [Trait("Category", "Published")]
 public class CliContractTests
 {
-    private static string Cli()
-    {
-        DirectoryInfo? directory = new(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Captr.slnx")))
-        {
-            directory = directory.Parent;
-        }
-
-        directory.ShouldNotBeNull("could not locate the repo root");
-        string cli = Path.Combine(directory.FullName, "publish", "captr.exe");
-        File.Exists(cli).ShouldBeTrue($"No published payload at {cli}. Run: pwsh build/build.ps1 -Publish -SkipTests");
-        return cli;
-    }
+    private static string Cli() => PublishedPayload.Cli();
 
     private static (int ExitCode, string Stdout, string Stderr) Run(params string[] arguments)
     {
