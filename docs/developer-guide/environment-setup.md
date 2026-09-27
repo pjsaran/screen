@@ -45,6 +45,14 @@ looks exactly like a broken repository.
 A green run ends with a test summary and no warnings. Anything else is a real
 failure — there are no expected warnings in this build.
 
+The tests never touch your own Captr. The integration suite runs under a data root
+of its own (`CAPTR_DATA_ROOT`, set before any test starts), so your real
+`%LOCALAPPDATA%\Captr` settings, queue, and caches are left alone, and a Captr you
+have running is never the one a test talks to. See [Testing](testing.md).
+
+On a Windows 11 PC with **Smart App Control** on, an unsigned build may be blocked
+from loading; see [Building](building.md#smart-app-control-on-a-development-machine).
+
 ## To run the application
 
 ```powershell

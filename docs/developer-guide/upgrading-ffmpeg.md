@@ -106,6 +106,12 @@ tag, set `licenceFlavor` to `lgpl`, and remove `libx264` from `optionalEncoders`
    `tools/ffmpeg/licenses`, and the publish step copies that folder beside the
    binary. Confirm it is there in `publish/ffmpeg/licenses`.
 
+   `fetch-ffmpeg.ps1` also records, in `capabilities.json`, a digest of each
+   executable that ignores its Authenticode signature. Captr refuses to run an
+   FFmpeg that does not match (or has no record), and signing refuses to sign one.
+   So never copy an `ffmpeg.exe` into `tools/ffmpeg/bin` or `publish/` by hand —
+   always go through the script, which records the new build's digests for you.
+
 9. **Commit** `ffmpeg.lock.json` and `THIRD-PARTY.md`. Nothing under `tools/` is
    committed — it is fetched.
 
