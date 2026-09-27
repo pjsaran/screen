@@ -52,15 +52,16 @@ Using [Graph Explorer](https://developer.microsoft.com/graph/graph-explorer)
 | Name | Your label, e.g. `SharePoint archive`. |
 | Site URL | `https://contoso.sharepoint.com/sites/Recordings` |
 | Drive ID | the `b!…` value from step 2 |
-| Folder in the library | `Shared Documents/Captr`, or with a [token](naming-patterns.md) such as `Shared Documents/Captr/{date:yyyy-MM}` |
+| Folder in the library | `Captr`, or with a [token](naming-patterns.md) such as `Captr/{date:yyyy-MM}`. A path **inside** the library the Drive ID names, starting at its top level — not a drive letter, not a `\\server` path, and no `..`. |
 | Tenant ID | from the registration |
 | Client ID | from the registration |
 | Client secret | the **Value** you copied |
 
 Press **Test connection** before saving: it signs in with exactly what is in the
-boxes and asks Graph for the library the Drive ID names. Success shows the
-library's name; failure says which field to fix. Nothing is uploaded and nothing
-is stored by the test.
+boxes — the secret you have just typed, not a sign-in remembered from earlier — and
+asks Graph for the library the Drive ID names. Success shows the library's name;
+failure says which field to fix. Nothing is uploaded and nothing is stored by the
+test.
 
 Save. The secret goes straight into Windows Credential Manager and **never** into
 `settings.json`. Captr cannot read it back afterwards — reopening the destination
@@ -90,7 +91,9 @@ When the secret expires or is rotated:
    anything that stopped while the old secret was dead.
 
 Transfers that failed on authentication show **SIGN-IN NEEDED** and resume on the
-next pass once a working credential exists.
+next pass once a working credential exists. That covers both a secret Microsoft
+sign-in refuses (mistyped, expired, deleted) and an access token SharePoint
+rejects; in either case nothing is uploaded until new credentials are saved.
 
 ## What to expect operationally
 
@@ -98,10 +101,19 @@ next pass once a working credential exists.
   (8 × 320 KiB, the multiple Graph requires), with the confirmed position recorded
   after **every** chunk. A crash, a reboot, or a dropped connection resumes from
   where the server says it got to — never from zero.
-- Throttling (429) and server errors (5xx) retry automatically with backoff,
-  honouring the server's own `Retry-After` when it sends one.
+- An upload session SharePoint has expired in the meantime is replaced by a new
+  one — after checking whether the file already arrived, so a lost final reply
+  never produces a second copy. Uploads only ever go to `https` addresses.
+- Throttling (429), timeouts (408), a locked item (423), and server errors (5xx)
+  retry automatically with backoff, honouring the server's own `Retry-After` when it
+  sends one.
 - Permission, quota, and policy errors stop and wait for a person, showing the
-  server's exact words. Those are not problems that retrying solves.
+  server's exact words. Those are not problems that retrying solves. With
+  `Sites.Selected`, a site the app was never granted is one of these: the transfer
+  shows **REFUSED** with SharePoint's reason (typically `accessDenied`) until the
+  site is granted and the transfer retried.
+- A finished upload is checked by comparing the size SharePoint reports with the
+  local file's.
 - Captr never overwrites a file in the library; a name that is taken gets a suffix.
 - A failed upload can never endanger the local recording.
 
