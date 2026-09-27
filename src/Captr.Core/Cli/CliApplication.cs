@@ -797,8 +797,8 @@ public static class CliApplication
             {
                 // No host = nothing recording: for stop/pause/resume that is a
                 // successful no-op (SPEC §10), reported honestly.
-                Emit(json, new StateResponse("idle", "No recording host is running — already idle."),
-                    "No recording host is running — already idle.");
+                Emit(json, new StateResponse("idle", "Nothing is recording — already idle."),
+                    "Nothing is recording — already idle.");
                 return ExitCodes.Success;
             }
 
@@ -820,7 +820,7 @@ public static class CliApplication
                 ClientVersion(), startHostIfNeeded, null, cancellationToken);
             if (client is null)
             {
-                await Console.Error.WriteLineAsync("No recording host is running.");
+                await Console.Error.WriteLineAsync("Captr's recorder is not running, so there is nothing to act on.");
                 return ExitCodes.HostUnreachable;
             }
 
