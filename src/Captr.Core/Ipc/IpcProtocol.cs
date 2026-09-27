@@ -172,6 +172,11 @@ public sealed record StateResponse(string State, string Message);
 /// the live coverage SPEC §9 requires the status view to show WHILE recording —
 /// holes are visible as they happen, not only after finalisation.
 /// </summary>
+/// <param name="LastOutcome">How the most recent recording ENDED, kept until the
+/// next one starts. Without it a recording that failed on its own was invisible: it
+/// went from "finalizing" to "idle" exactly like one somebody stopped, usually
+/// between two polls. Added without a protocol bump — an older client simply
+/// ignores the field.</param>
 public sealed record StatusResponse(
     string State,
     Guid? SessionId,
@@ -185,7 +190,21 @@ public sealed record StatusResponse(
     int GapCount = 0,
     double Coverage = 1.0,
     string? Quality = null,
-    string? SpeedPreset = null);
+    string? SpeedPreset = null,
+    SessionOutcome? LastOutcome = null);
+
+/// <summary>How a recording ended.</summary>
+/// <param name="Result"><c>completed</c> (stopped by a person, a schedule, or
+/// Windows shutting down), <c>failed</c> (stopped by itself — repeated encoder faults,
+/// a nearly full disk), or <c>faulted</c> (an internal error; the footage is recovered
+/// on the next host start).</param>
+/// <param name="Reason">Plain-language cause for anything but <c>completed</c>.</param>
+public sealed record SessionOutcome(
+    Guid SessionId,
+    string Result,
+    string? Reason,
+    DateTimeOffset EndedUtc,
+    string WorkingFolder);
 
 /// <summary>One past recording, as every list of them sees it.</summary>
 /// <param name="OutputFiles">The finalised video files' names, from the integrity

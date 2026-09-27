@@ -510,7 +510,7 @@ public static class CliApplication
                 StateResponse response = await client.RequestAsync<StateResponse>(
                     IpcKinds.RetryTransfer, new RetryTransferRequest(parseResult.GetValue(idArgument)), cancellationToken);
                 Emit(json, response, response.Message);
-                return ExitCodes.Success;
+                return response.State == Hosting.HostService.NotFound ? ExitCodes.Error : ExitCodes.Success;
             }, cancellationToken);
         });
         command.Subcommands.Add(retry);
@@ -529,7 +529,7 @@ public static class CliApplication
                 StateResponse response = await client.RequestAsync<StateResponse>(
                     IpcKinds.CancelTransfer, new CancelTransferRequest(parseResult.GetValue(stopId)), cancellationToken);
                 Emit(json, response, response.Message);
-                return ExitCodes.Success;
+                return response.State == Hosting.HostService.NotFound ? ExitCodes.Error : ExitCodes.Success;
             }, cancellationToken);
         });
         command.Subcommands.Add(stop);

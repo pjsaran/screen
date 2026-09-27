@@ -23,11 +23,26 @@ public sealed class HostService : IHostOperations
     private readonly TransferQueue _transferQueue;
     private readonly TransferWorker? _transferWorker;
     private readonly ILogger _log;
+    private readonly Func<CaptrSettings, StartRequest, CancellationToken, Task<IRecordingSession>> _createSession;
     private readonly Lock _gate = new();
 
-    private RecordingSession? _session;
-    private Task<FinalizationResult>? _sessionRun;
+    // The newest session, and the task that runs it to the end of finalisation.
+    private IRecordingSession? _session;
+    private Task? _sessionRun;
+    private bool _stopRequested;
+
+    // Older sessions still stopping or finalising after a newer one started. They
+    // keep the host busy and are reported by status only when nothing newer is.
+    private readonly List<(IRecordingSession Session, Task Run)> _finishing = [];
+
+    // The one start being planned right now; concurrent starts wait for it.
+    private Task<StartResponse>? _startInFlight;
+
+    private SessionOutcome? _lastOutcome;
     private DateTimeOffset _lastActivityUtc = DateTimeOffset.UtcNow;
+
+    // Completed unless the host is running its startup recovery scan.
+    private TaskCompletionSource _startupRecovery = CompletedGate();
 
     public HostService(
         SettingsStore settingsStore,
@@ -35,12 +50,44 @@ public sealed class HostService : IHostOperations
         ILogger log,
         TransferQueue? transferQueue = null,
         TransferWorker? transferWorker = null)
+        : this(settingsStore, systemEvents, log, transferQueue, transferWorker, sessionFactory: null)
+    {
+    }
+
+    /// <param name="sessionFactory">Test seam: plans and creates a session. Production
+    /// passes null, which plans with <see cref="SessionPlanner"/> and creates a real
+    /// <see cref="RecordingSession"/>.</param>
+    internal HostService(
+        SettingsStore settingsStore,
+        MessageOnlyWindow? systemEvents,
+        ILogger log,
+        TransferQueue? transferQueue,
+        TransferWorker? transferWorker,
+        Func<CaptrSettings, StartRequest, CancellationToken, Task<IRecordingSession>>? sessionFactory)
     {
         _settingsStore = settingsStore;
         _systemEvents = systemEvents;
         _log = log.ForContext<HostService>();
         _transferQueue = transferQueue ?? new TransferQueue();
         _transferWorker = transferWorker;
+        _createSession = sessionFactory ?? PlanAndCreateSessionAsync;
+    }
+
+    private static TaskCompletionSource CompletedGate()
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        gate.SetResult();
+        return gate;
+    }
+
+    private async Task<IRecordingSession> PlanAndCreateSessionAsync(
+        CaptrSettings settings, StartRequest request, CancellationToken cancellationToken)
+    {
+        var planner = new SessionPlanner(_log);
+        (RecordingSession.SessionContext context, SessionStarted startEvent) = await planner.PlanAsync(
+            settings, request.FrameRate, request.Quality, request.SpeedPreset, request.Label, cancellationToken)
+            .ConfigureAwait(false);
+        return RecordingSession.Create(context, startEvent, _log);
     }
 
     /// <summary>When the host last did anything — feeds the idle-exit timer.</summary>
@@ -54,7 +101,7 @@ public sealed class HostService : IHostOperations
         {
             lock (_gate)
             {
-                if (_sessionRun is { IsCompleted: false })
+                if (_sessionRun is { IsCompleted: false } || _finishing.Count > 0 || _startInFlight is { IsCompleted: false })
                 {
                     return true;
                 }
@@ -64,27 +111,82 @@ public sealed class HostService : IHostOperations
         }
     }
 
+    /// <summary>
+    /// Starts a recording, or reports the one already running (SPEC §10: starting
+    /// while recording is not an error).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One start at a time.</b> Planning takes seconds — displays are resolved and,
+    /// on a first run, an encoder is proven by a trial encode — and a scheduled task,
+    /// a hotkey, the tray, and the CLI can all ask within that window. The "already
+    /// recording?" check and the moment the new session became visible used to sit
+    /// under two separate locks with the plan in between, so two requests could both
+    /// pass the check: two encoders recorded the same screen, and the first session
+    /// was overwritten in the host's bookkeeping, leaving it running where no Stop
+    /// could reach it. Now the first request plans and every concurrent one waits
+    /// for it and is told about the same session.
+    /// </para>
+    /// <para>
+    /// <b>A finishing recording never blocks the next one.</b> A session that has been
+    /// asked to stop (or has failed) can spend minutes joining and hashing its
+    /// segments. Starting during that time used to answer "already recording" and
+    /// record nothing, so a stop task and a start task scheduled for the same minute
+    /// lost the whole second block. The finishing session now carries on in the
+    /// background while the new one records.
+    /// </para>
+    /// </remarks>
     public async Task<StartResponse> StartAsync(StartRequest request, CancellationToken cancellationToken)
     {
         Touch();
+
+        // SPEC §6: interrupted sessions are recovered before new work begins.
+        await _startupRecovery.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        Task<StartResponse> inFlight;
+        bool joined;
         lock (_gate)
         {
-            if (_session is not null && _sessionRun is { IsCompleted: false })
+            if (_session is not null && _sessionRun is { IsCompleted: false } && !IsFinishing(_session))
             {
-                // SPEC §10: not an error — report the existing state, succeed.
-                return new StartResponse(
-                    AlreadyRecording: true, _session.Context.SessionId,
-                    $"Already recording (state {_session.State}); the existing session continues.");
+                return AlreadyRecording(_session);
             }
+
+            joined = _startInFlight is { IsCompleted: false };
+            if (!joined)
+            {
+                _startInFlight = StartNewSessionAsync(request, cancellationToken);
+            }
+
+            inFlight = _startInFlight!;
         }
 
-        CaptrSettings settings = _settingsStore.Load();
-        var planner = new SessionPlanner(_log);
-        (RecordingSession.SessionContext context, SessionStarted startEvent) = await planner.PlanAsync(
-            settings, request.FrameRate, request.Quality, request.SpeedPreset, request.Label, cancellationToken)
-            .ConfigureAwait(false);
+        StartResponse response = await inFlight.ConfigureAwait(false);
+        return joined ? response with { AlreadyRecording = true, Message = "Already starting; " + response.Message } : response;
+    }
 
-        RecordingSession session = RecordingSession.Create(context, startEvent, _log);
+    /// <summary>State reported when a transfer id matches nothing that can be acted on;
+    /// the CLI exits with its error code for it.</summary>
+    public const string NotFound = "not-found";
+
+    private static StartResponse AlreadyRecording(IRecordingSession session) =>
+        new(AlreadyRecording: true, session.Context.SessionId,
+            $"Already recording (state {session.State.ToString().ToLowerInvariant()}); the existing session continues.");
+
+    /// <summary>True once a session is on its way out: asked to stop, or past the
+    /// point where it records anything.</summary>
+    private bool IsFinishing(IRecordingSession session) =>
+        (ReferenceEquals(session, _session) && _stopRequested)
+        || session.State is SessionState.Stopping or SessionState.Finalizing or SessionState.Completed or SessionState.Failed;
+
+    private async Task<StartResponse> StartNewSessionAsync(StartRequest request, CancellationToken cancellationToken)
+    {
+        // Yield so the caller releases the lock before planning begins.
+        await Task.Yield();
+
+        CaptrSettings settings = _settingsStore.Load();
+        IRecordingSession session = await _createSession(settings, request, cancellationToken).ConfigureAwait(false);
+        RecordingSession.SessionContext context = session.Context;
         if (_systemEvents is not null)
         {
             session.AttachSystemEvents(_systemEvents);
@@ -92,15 +194,17 @@ public sealed class HostService : IHostOperations
 
         lock (_gate)
         {
+            if (_session is not null && _sessionRun is { IsCompleted: false })
+            {
+                // The previous session is stopping or finalising; let it finish in the
+                // background, still counted as work and still reported if it fails.
+                _finishing.Add((_session, _sessionRun));
+            }
+
             _session = session;
-            _sessionRun = Task.Run(
-                async () =>
-                {
-                    FinalizationResult result = await session.RunAsync(CancellationToken.None).ConfigureAwait(false);
-                    HandleFinalized(result);
-                    return result;
-                },
-                CancellationToken.None);
+            _stopRequested = false;
+            _lastOutcome = null;
+            _sessionRun = Task.Run(() => RunToEndAsync(session), CancellationToken.None);
         }
 
         _log.Information("Recording started: session {SessionId} into {Folder}",
@@ -108,13 +212,68 @@ public sealed class HostService : IHostOperations
         return new StartResponse(false, context.SessionId, $"Recording started (session {context.SessionId:N}).");
     }
 
+    /// <summary>
+    /// Runs one session to the end of finalisation and records how it ended. Nothing
+    /// escapes: a session that throws used to fault a task nobody observed, so the
+    /// recording simply stopped — no log line, no status, nothing transferred.
+    /// </summary>
+    private async Task RunToEndAsync(IRecordingSession session)
+    {
+        SessionOutcome outcome;
+        try
+        {
+            FinalizationResult result = await session.RunAsync(CancellationToken.None).ConfigureAwait(false);
+            HandleFinalized(result);
+            outcome = OutcomeOf(session);
+        }
+        catch (OperationCanceledException)
+        {
+            outcome = OutcomeOf(session);
+        }
+        catch (Exception exception)
+        {
+            _log.Error(exception,
+                "Session {SessionId} ended with an internal error; its footage is recovered on the next host start",
+                session.Context.SessionId);
+            outcome = new SessionOutcome(
+                session.Context.SessionId, "faulted",
+                "Captr hit an internal error and stopped this recording: " + exception.Message +
+                " Everything recorded so far is kept and is finalised automatically the next time Captr starts.",
+                DateTimeOffset.UtcNow, session.Context.WorkingFolder);
+        }
+
+        lock (_gate)
+        {
+            _finishing.RemoveAll(entry => ReferenceEquals(entry.Session, session));
+
+            // Only the newest recording's ending is reported; an older one finishing
+            // late must not paint a "failed" banner over a recording in progress
+            // unless it really failed.
+            if (ReferenceEquals(session, _session) || outcome.Result != "completed")
+            {
+                _lastOutcome = outcome;
+            }
+        }
+
+        Touch();
+    }
+
+    private static SessionOutcome OutcomeOf(IRecordingSession session) =>
+        session.FailureReason is { } reason
+            ? new SessionOutcome(session.Context.SessionId, "failed", reason, DateTimeOffset.UtcNow, session.Context.WorkingFolder)
+            : new SessionOutcome(session.Context.SessionId, "completed", null, DateTimeOffset.UtcNow, session.Context.WorkingFolder);
+
     public Task<StopResponse> StopAsync(CancellationToken cancellationToken)
     {
         Touch();
-        RecordingSession? session;
+        IRecordingSession? session;
         lock (_gate)
         {
             session = _sessionRun is { IsCompleted: false } ? _session : null;
+            if (session is not null)
+            {
+                _stopRequested = true;
+            }
         }
 
         if (session is null)
@@ -130,10 +289,16 @@ public sealed class HostService : IHostOperations
     public Task<StateResponse> PauseAsync(CancellationToken cancellationToken)
     {
         Touch();
-        RecordingSession? session = ActiveSession();
+        IRecordingSession? session = RecordingSessionOrNull();
         if (session is null)
         {
-            return Task.FromResult(new StateResponse("idle", "Nothing is recording, so there is nothing to pause."));
+            return Task.FromResult(new StateResponse(IdleOrFinishing(),
+                "Nothing is recording, so there is nothing to pause."));
+        }
+
+        if (session.State == SessionState.Paused)
+        {
+            return Task.FromResult(new StateResponse("paused", "The recording is already paused."));
         }
 
         session.RequestPause();
@@ -143,23 +308,40 @@ public sealed class HostService : IHostOperations
     public Task<StateResponse> ResumeAsync(CancellationToken cancellationToken)
     {
         Touch();
-        RecordingSession? session = ActiveSession();
+        IRecordingSession? session = RecordingSessionOrNull();
         if (session is null)
         {
-            return Task.FromResult(new StateResponse("idle", "Nothing is recording, so there is nothing to resume."));
+            return Task.FromResult(new StateResponse(IdleOrFinishing(),
+                "Nothing is recording, so there is nothing to resume."));
+        }
+
+        if (session.State != SessionState.Paused)
+        {
+            return Task.FromResult(new StateResponse(session.State.ToString().ToLowerInvariant(),
+                "The recording is not paused, so there is nothing to resume."));
         }
 
         session.RequestResume();
         return Task.FromResult(new StateResponse("recording", "Recording resumed into a new segment."));
     }
 
+    private string IdleOrFinishing() => ActiveSession() is { } finishing
+        ? finishing.State.ToString().ToLowerInvariant()
+        : "idle";
+
     public Task<StatusResponse> GetStatusAsync(CancellationToken cancellationToken)
     {
-        RecordingSession? session = ActiveSession();
+        IRecordingSession? session = ActiveSession();
+        SessionOutcome? lastOutcome;
+        lock (_gate)
+        {
+            lastOutcome = _lastOutcome;
+        }
+
         if (session is null)
         {
             return Task.FromResult(new StatusResponse(
-                "idle", null, null, null, null, null, null, null, null));
+                "idle", null, null, null, null, null, null, null, null, LastOutcome: lastOutcome));
         }
 
         EncoderProgress? progress = session.LatestProgress;
@@ -178,7 +360,8 @@ public sealed class HostService : IHostOperations
             gapCount,
             coverage,
             session.CurrentQuality,
-            session.CurrentSpeedPreset));
+            session.CurrentSpeedPreset,
+            lastOutcome));
     }
 
     public Task<ListRecordingsResponse> ListRecordingsAsync(CancellationToken cancellationToken)
@@ -209,6 +392,35 @@ public sealed class HostService : IHostOperations
         [
             .. reports.Select(r => new RecoverySummary(r.SessionFolder, r.Succeeded, r.FailureReason, r.RecoveredDuration)),
         ]);
+    }
+
+    /// <summary>
+    /// Makes start requests wait for <see cref="RunStartupRecoveryAsync"/>. Called
+    /// before the pipe opens, so no start can slip in ahead of recovery (SPEC §6:
+    /// interrupted sessions are recovered before new work begins).
+    /// </summary>
+    public void HoldStartsUntilRecoveryCompletes() =>
+        _startupRecovery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// The host's startup recovery scan. Releases held starts when it finishes —
+    /// including when it fails, because a recovery problem is logged and reported,
+    /// and must never stop the user recording something new.
+    /// </summary>
+    public async Task RunStartupRecoveryAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RunRecoveryScanAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _log.Error(exception, "The startup recovery scan failed; new recordings are allowed regardless");
+        }
+        finally
+        {
+            _startupRecovery.TrySetResult();
+        }
     }
 
     /// <summary>The recovery scan the host runs at startup (SPEC §6: "on every host
@@ -246,7 +458,13 @@ public sealed class HostService : IHostOperations
     public Task<StateResponse> RetryTransferAsync(RetryTransferRequest request, CancellationToken cancellationToken)
     {
         Touch();
-        _transferQueue.Retry(request.Id);
+        if (!_transferQueue.Retry(request.Id))
+        {
+            return Task.FromResult(new StateResponse(NotFound,
+                $"There is no transfer {request.Id} that can be retried — it does not exist, or it already completed. " +
+                "Run 'captr transfers list' to see the ids."));
+        }
+
         return Task.FromResult(new StateResponse("pending", $"Transfer {request.Id} queued for retry."));
     }
 
@@ -281,7 +499,13 @@ public sealed class HostService : IHostOperations
     public Task<StateResponse> CancelTransferAsync(CancelTransferRequest request, CancellationToken cancellationToken)
     {
         Touch();
-        _transferQueue.Cancel(request.Id);
+        if (!_transferQueue.Cancel(request.Id))
+        {
+            return Task.FromResult(new StateResponse(NotFound,
+                $"There is no transfer {request.Id} that can be stopped — it does not exist, or it already " +
+                "finished or stopped. Run 'captr transfers list' to see the ids."));
+        }
+
         _log.Information("Transfer {Id} stopped at the user's request", request.Id);
         return Task.FromResult(new StateResponse(
             TransferQueue.StateCancelled,
@@ -298,7 +522,7 @@ public sealed class HostService : IHostOperations
     {
         Touch();
         CaptrSettings current = _settingsStore.Load();
-        RecordingSession? session = ActiveSession();
+        IRecordingSession? session = RecordingSessionOrNull();
 
         if (session is null)
         {
@@ -582,11 +806,31 @@ public sealed class HostService : IHostOperations
         }
     }
 
-    private RecordingSession? ActiveSession()
+    /// <summary>The session status should describe: the newest one while it runs,
+    /// otherwise any older one still finalising (so "stop, then wait for idle" still
+    /// means "wait until the recording is saved").</summary>
+    private IRecordingSession? ActiveSession()
     {
         lock (_gate)
         {
-            return _sessionRun is { IsCompleted: false } ? _session : null;
+            if (_sessionRun is { IsCompleted: false })
+            {
+                return _session;
+            }
+
+            return _finishing.Count > 0 ? _finishing[^1].Session : null;
+        }
+    }
+
+    /// <summary>The session that is actually recording (or paused) — the only one
+    /// pause, resume, and settings changes can act on.</summary>
+    private IRecordingSession? RecordingSessionOrNull()
+    {
+        lock (_gate)
+        {
+            return _session is not null && _sessionRun is { IsCompleted: false } && !IsFinishing(_session)
+                ? _session
+                : null;
         }
     }
 
@@ -594,12 +838,25 @@ public sealed class HostService : IHostOperations
 
     private sealed record RecordingPlanSummary(DateTimeOffset StartedUtc, string Encoder, int FrameRate);
 
-    private static RecordingPlanSummary SummarisePlan(RecordingSession session)
+    private static RecordingPlanSummary SummarisePlan(IRecordingSession session)
     {
-        IReadOnlyList<JournalEvent> events = SessionJournal.ReadAll(
-            Path.Combine(session.Context.WorkingFolder, SessionJournal.FileName));
-        SessionStarted start = events.OfType<SessionStarted>().First();
-        return new RecordingPlanSummary(start.TimestampUtc, start.EncoderName, start.FrameRate);
+        try
+        {
+            IReadOnlyList<JournalEvent> events = SessionJournal.ReadAll(
+                Path.Combine(session.Context.WorkingFolder, SessionJournal.FileName));
+            if (events.OfType<SessionStarted>().FirstOrDefault() is { } start)
+            {
+                return new RecordingPlanSummary(start.TimestampUtc, start.EncoderName, start.FrameRate);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Fall through: a status query must never fail because the journal was
+            // momentarily unreadable (or its folder has been deleted under us).
+        }
+
+        return new RecordingPlanSummary(
+            DateTimeOffset.UtcNow, session.Context.InitialPlan.Encoder.CodecName, session.CurrentFrameRate);
     }
 
     /// <summary>
@@ -609,7 +866,7 @@ public sealed class HostService : IHostOperations
     /// arithmetic finalisation will apply, so the number the user watches is the
     /// number they get.
     /// </summary>
-    private static (int GapCount, double Coverage) LiveCoverage(RecordingSession session)
+    private static (int GapCount, double Coverage) LiveCoverage(IRecordingSession session)
     {
         try
         {
@@ -626,7 +883,7 @@ public sealed class HostService : IHostOperations
         }
     }
 
-    private static double? DiskMinutes(RecordingSession session)
+    private static double? DiskMinutes(IRecordingSession session)
     {
         try
         {

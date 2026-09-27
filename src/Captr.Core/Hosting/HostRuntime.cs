@@ -20,6 +20,14 @@ public sealed class HostRuntime
     /// enough that "nothing running" is true within minutes (SPEC §4).</summary>
     public static readonly TimeSpan IdleExitDelay = TimeSpan.FromMinutes(2);
 
+    /// <summary>How long a new host waits for a previous one in the same Windows
+    /// session to finish its idle exit.</summary>
+    private static readonly TimeSpan SingleInstanceWait = TimeSpan.FromSeconds(30);
+
+    /// <summary>Exit code when the pipe name is already owned elsewhere — only ever
+    /// seen in the host log; the CLI reports the host as unreachable.</summary>
+    private const int ExitPipeNameTaken = 4;
+
     private readonly string _hostVersion;
 
     public HostRuntime(string hostVersion) => _hostVersion = hostVersion;
@@ -27,14 +35,35 @@ public sealed class HostRuntime
     /// <summary>Runs the host until idle. Returns the process exit code.</summary>
     public async Task<int> RunAsync(CancellationToken cancellationToken)
     {
-        // Single instance per user: a second host would fight over the pipe.
-        using var singleInstance = new Mutex(initiallyOwned: true, @"Local\CaptrHost", out bool isFirst);
-        if (!isFirst)
+        // One host per Windows session. The mutex is the cheap, session-local half of
+        // that rule; the pipe below is the authoritative, machine-wide half.
+        //
+        // A host that finds the mutex taken WAITS for it rather than leaving at once:
+        // the usual reason is a previous host in the middle of its idle exit, and a
+        // client that spawned this one because the old one had stopped answering
+        // would otherwise poll for a minute and report "did not begin answering".
+        using var singleInstance = new Mutex(initiallyOwned: false, @"Local\CaptrHost");
+        bool acquired;
+        try
         {
-            return 0; // A host is already serving this user — nothing to do.
+            acquired = singleInstance.WaitOne(SingleInstanceWait);
+        }
+        catch (AbandonedMutexException)
+        {
+            acquired = true; // The previous host died holding it; the mutex is ours now.
         }
 
         ILogger log = CreateLogger();
+        if (!acquired)
+        {
+            log.Warning(
+                "Another Captr recorder in this Windows session still held the single-instance lock after {Wait}; " +
+                "this one is not needed and is exiting",
+                SingleInstanceWait);
+            await Log.CloseAndFlushAsync().ConfigureAwait(false);
+            return 0;
+        }
+
         log.Information("Recording host starting (version {Version}, pid {Pid})", _hostVersion, Environment.ProcessId);
 
         try
@@ -45,8 +74,34 @@ public sealed class HostRuntime
             using var transferWorker = new Transfers.TransferWorker(transferQueue, settingsStore, log);
             var service = new HostService(settingsStore, systemEvents, log, transferQueue, transferWorker);
 
-            // SPEC §6: recover interrupted sessions BEFORE accepting new work.
-            await service.RunRecoveryScanAsync(cancellationToken).ConfigureAwait(false);
+            // Claim the pipe FIRST — before recovery touches a single session folder.
+            //
+            // If this user already has a recorder in another Windows session (a
+            // scheduled task, a second remote desktop session), that host owns the
+            // name and this one must not run: its recovery scan would treat the other
+            // host's live recording as a crash, adopt its encoder, and kill it. And if
+            // someone else created the name, serving under their security descriptor
+            // would hand them the recorder (see IpcServer.Start).
+            //
+            // Opening the pipe before recovery also means a client never waits in
+            // silence while a long crashed session is finalised: status answers at
+            // once, and a start request queues behind recovery instead of timing out.
+            service.HoldStartsUntilRecoveryCompletes();
+            await using var ipcServer = new IpcServer(service, _hostVersion, log);
+            try
+            {
+                ipcServer.Start();
+            }
+            catch (PipeNameTakenException exception)
+            {
+                log.Error("{Reason}", exception.Message);
+                return ExitPipeNameTaken;
+            }
+
+            log.Information("Host ready; listening on the user pipe");
+
+            // SPEC §6: recover interrupted sessions BEFORE starting new work.
+            await service.RunStartupRecoveryAsync(cancellationToken).ConfigureAwait(false);
 
             // SPEC §7: reclaim disk from sessions that are transferred, verified, and
             // past their retention period. Host start is the natural moment — the
@@ -74,10 +129,6 @@ public sealed class HostRuntime
 
             using var transferCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             Task transferTask = transferWorker.RunAsync(transferCts.Token);
-
-            await using var ipcServer = new IpcServer(service, _hostVersion, log);
-            ipcServer.Start();
-            log.Information("Host ready; listening on the user pipe");
 
             // Idle loop: exit when nothing has happened for a while and no session
             // is active (SPEC §4: exits after a short idle period).
@@ -126,9 +177,15 @@ public sealed class HostRuntime
             // any secret-suggestive property is masked no matter who logs it.
             .WithSecretRedaction()
             .Enrich.WithProperty("ProcessRole", "host")
+            // Capped as well as rotated: a new file each day or every 20 MB (a busy
+            // day rolls on to host-<date>_001.log), and only the newest 14 files are
+            // kept — 280 MB at the very most. The library's own default is a 1 GB cap
+            // per file, which a supervisor restart loop logging at Debug could reach.
             .WriteTo.File(
                 Path.Combine(logFolder, "host-.log"),
                 rollingInterval: RollingInterval.Day,
+                fileSizeLimitBytes: 20L * 1024 * 1024,
+                rollOnFileSizeLimit: true,
                 retainedFileCountLimit: 14,
                 formatProvider: System.Globalization.CultureInfo.InvariantCulture,
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}")

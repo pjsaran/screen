@@ -20,7 +20,7 @@ namespace Captr.Core.Sessions;
 /// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable",
     Justification = "The shutdown block is created and released entirely within RunAsync's lifetime; a session is not a disposable resource its callers hold.")]
-public sealed class RecordingSession
+public sealed class RecordingSession : IRecordingSession
 {
     private readonly SessionContext _context;
     private readonly SessionJournal _journal;
@@ -60,6 +60,9 @@ public sealed class RecordingSession
 
     /// <summary>Current lifecycle state, for status queries and the heartbeat.</summary>
     public SessionState State => _state;
+
+    /// <inheritdoc/>
+    public string? FailureReason { get; private set; }
 
     /// <summary>Latest encoder progress, for status queries.</summary>
     public EncoderProgress? LatestProgress => _supervisor.LatestProgress;
@@ -293,6 +296,7 @@ public sealed class RecordingSession
         {
             var pipeline = new FinalizationPipeline(_context.FfmpegPath, _context.FfprobePath, _log);
             FinalizationResult result = await pipeline.RunAsync(_context.WorkingFolder, CancellationToken.None).ConfigureAwait(false);
+            FailureReason = failure;
             _state = failure is null ? SessionState.Completed : SessionState.Failed;
 
             if (failure is not null)

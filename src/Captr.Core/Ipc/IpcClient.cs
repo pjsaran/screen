@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Security.Principal;
 
 namespace Captr.Core.Ipc;
 
@@ -66,8 +67,14 @@ public sealed class IpcClient : IAsyncDisposable
     private static async Task<IpcClient?> TryConnectOnceAsync(
         string clientVersion, string? instanceSuffix, CancellationToken cancellationToken)
     {
+        // CurrentUserOnly makes the connection verify that the pipe's OWNER is this
+        // user, so a pipe created first by someone else (the name is computable from
+        // a public SID) is refused instead of being handed our settings and commands.
+        // Identification is the most the server may do with our token: it can learn
+        // who we are, but it cannot act as us.
         var pipe = new NamedPipeClientStream(
-            ".", IpcProtocol.PipeName(instanceSuffix), PipeDirection.InOut, PipeOptions.Asynchronous);
+            ".", IpcProtocol.PipeName(instanceSuffix), PipeDirection.InOut,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, TokenImpersonationLevel.Identification);
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -79,6 +86,14 @@ public sealed class IpcClient : IAsyncDisposable
             await pipe.DisposeAsync().ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            await pipe.DisposeAsync().ConfigureAwait(false);
+            throw new HostUnreachableException(
+                "Captr's command pipe exists but does not belong to you, so Captr refused to use it. " +
+                "Another account on this PC, or another program, has taken its name. Sign out and back in; " +
+                "if it persists, ask your administrator to check which process owns the pipe.");
         }
 
         var client = new IpcClient(pipe, clientVersion);
@@ -94,6 +109,14 @@ public sealed class IpcClient : IAsyncDisposable
         {
             await client.DisposeAsync().ConfigureAwait(false);
             return null;
+        }
+        catch
+        {
+            // Every other handshake failure (a refusal, a torn reply) still owns
+            // the pipe; releasing it here is what stops the UI's once-a-second poll
+            // leaking a handle per attempt against a mismatched host.
+            await client.DisposeAsync().ConfigureAwait(false);
+            throw;
         }
 
         return client;
