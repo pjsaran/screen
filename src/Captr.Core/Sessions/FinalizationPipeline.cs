@@ -22,6 +22,7 @@ public sealed class FinalizationPipeline
     private static readonly TimeSpan JoinTimeout = TimeSpan.FromMinutes(30);
 
     private readonly string _ffmpegPath;
+    private readonly Func<string, long?> _freeSpace;
     private readonly string _ffprobePath;
     private readonly ILogger _log;
 
@@ -30,7 +31,15 @@ public sealed class FinalizationPipeline
     public string FfmpegPath => _ffmpegPath;
 
     public FinalizationPipeline(string ffmpegPath, string ffprobePath, ILogger log)
+        : this(ffmpegPath, ffprobePath, log, freeSpace: null)
     {
+    }
+
+    /// <param name="freeSpace">Test seam: free bytes for a folder. Null means the
+    /// real volume (<see cref="Common.FreeSpace"/>).</param>
+    internal FinalizationPipeline(string ffmpegPath, string ffprobePath, ILogger log, Func<string, long?>? freeSpace)
+    {
+        _freeSpace = freeSpace ?? Common.FreeSpace.AvailableBytes;
         _ffmpegPath = ffmpegPath;
         _ffprobePath = ffprobePath;
         _log = log.ForContext<FinalizationPipeline>();
@@ -51,7 +60,13 @@ public sealed class FinalizationPipeline
         // --- 2. Probe every segment; repair what does not play -------------------
         var segments = new List<FinalizedSegment>();
         int repaired = 0;
-        foreach (string segmentPath in Directory.GetFiles(workingFolder, "seg-*.mkv").Order(StringComparer.Ordinal))
+        // ".repaired." files are a repair's scratch output; one left behind by an
+        // interrupted repair is not a segment of its own (SegmentTracker skips them
+        // for the same reason) and would otherwise be probed, "repaired" again, or
+        // counted twice.
+        foreach (string segmentPath in Directory.GetFiles(workingFolder, "seg-*.mkv")
+                     .Where(path => !Path.GetFileName(path).Contains(".repaired.", StringComparison.Ordinal))
+                     .Order(StringComparer.Ordinal))
         {
             (FinalizedSegment? segment, bool wasRepaired, string? note) =
                 await ProbeAndRepairAsync(segmentPath, cancellationToken).ConfigureAwait(false);
@@ -210,10 +225,28 @@ public sealed class FinalizationPipeline
 
         if (segments.Count == 1)
         {
-            // A single segment needs no join — copy semantics via hard link would be
-            // clever; a plain copy is boring and predictable. Working files stay.
-            File.Copy(Path.Combine(workingFolder, segments[0].FileName), joinedPath, overwrite: true);
+            // A single segment needs no join: the output is a second NAME for the
+            // same bytes (a hard link), costing no disk at all. It was a full copy,
+            // which doubled the footage on disk at exactly the moment a recording
+            // stopped for want of space. A volume without hard links (FAT32, some
+            // network shares) falls back to the copy. Working files stay either way.
+            string only = Path.Combine(workingFolder, segments[0].FileName);
+            File.Delete(joinedPath);
+            if (!Windows.Win32.PInvoke.CreateHardLink(joinedPath, only))
+            {
+                File.Copy(only, joinedPath, overwrite: true);
+            }
+
             return joinedPath;
+        }
+
+        // A join writes a new file as large as all its segments together, beside
+        // them. Check the room is there first: failing with an FFmpeg exit code,
+        // mid-write, is what used to happen after a recording stopped for low disk.
+        long needed = segments.Sum(s => s.SizeBytes) + (64L << 20);
+        if (_freeSpace(workingFolder) is { } free && free < needed)
+        {
+            throw new NotEnoughSpaceToFinaliseException(workingFolder, needed, free);
         }
 
         // concat demuxer list. Single quotes with escaping per ffmpeg's concat rules.
@@ -342,6 +375,17 @@ public sealed record FinalizationResult(
     int SegmentCount,
     int RepairedSegments,
     IReadOnlyList<string> Notes);
+
+/// <summary>
+/// There is not room to assemble the recording yet. Nothing is lost: every segment
+/// is kept and playable, and the session stays unfinalised, so recovery finishes it
+/// automatically — on the next host start, or `captr recover` — once space is freed.
+/// </summary>
+public sealed class NotEnoughSpaceToFinaliseException(string workingFolder, long neededBytes, long freeBytes)
+    : IOException(
+        $"There is not enough free disk space to assemble this recording: it needs {neededBytes / 1_000_000_000.0:F1} GB " +
+        $"and {freeBytes / 1_000_000_000.0:F1} GB is free. Every part of it is safe in {workingFolder}. Free some space; " +
+        "Captr then finishes it automatically the next time it starts, or at once with 'captr recover'.");
 
 /// <summary>One verified segment inside the integrity record.</summary>
 public sealed record FinalizedSegment(

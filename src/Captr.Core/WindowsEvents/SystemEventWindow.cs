@@ -7,26 +7,40 @@ using Windows.Win32.UI.WindowsAndMessaging;
 namespace Captr.Core.WindowsEvents;
 
 /// <summary>
-/// A hidden message-only window on a dedicated thread, translating the Windows
+/// A hidden top-level window on a dedicated thread, translating the Windows
 /// messages of SPEC §6's events table into .NET events. Owns the window and its
 /// message loop; if it dies, the host goes deaf to sleep, lock, display, and
 /// shutdown events — so its loop never throws outward.
 /// </summary>
 /// <remarks>
+/// <para>
+/// TOP-LEVEL, never shown, never on the taskbar. It was once a message-only window
+/// (parent <c>HWND_MESSAGE</c>), and message-only windows receive no broadcasts —
+/// while suspend/resume, display changes, the clock, and shutdown/logoff all arrive
+/// as broadcasts to top-level windows. Only the explicitly registered lock/remote
+/// notifications ever got through: sleep never closed a segment, a resolution change
+/// was handled as three encoder faults and a loud stop, and logoff never finalised.
+/// </para>
+/// <para>
 /// Events are raised ON THE MESSAGE THREAD. Handlers must be quick and must
 /// marshal real work elsewhere; a blocked handler blocks every subsequent system
 /// message. The session engine posts to its own loop for exactly this reason.
+/// </para>
 /// </remarks>
-public sealed class MessageOnlyWindow : IDisposable
+public sealed class SystemEventWindow : IDisposable
 {
+    // Private message: "run the queued actions on this thread".
+    private const uint RunQueuedActions = PInvoke.WM_APP + 1;
+
+    private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _queued = new();
     private const string WindowClassName = "CaptrHostEvents";
 
     // A window CLASS owns its procedure, so the procedure must be static and
     // process-lifetime: routing per-window through this registry is what lets two
-    // MessageOnlyWindow instances (e.g. in tests) coexist. The delegate is stored
+    // SystemEventWindow instances (e.g. in tests) coexist. The delegate is stored
     // statically so the GC can never collect it out from under the OS.
     private static readonly WNDPROC StaticWindowProcedure = RouteMessage;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, MessageOnlyWindow> Instances = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<nint, SystemEventWindow> Instances = new();
     private static int ClassRegistered;
 
     private readonly Thread _thread;
@@ -56,6 +70,24 @@ public sealed class MessageOnlyWindow : IDisposable
     /// <summary>The created window handle (for ShutdownBlock registration).</summary>
     public nint Handle => _hwnd;
 
+    /// <summary>Test seam: every message the window receives, before it is handled.</summary>
+    internal event Action<uint>? MessageReceived;
+
+    /// <summary>
+    /// Runs <paramref name="action"/> on the window's own thread, soon. Some window
+    /// APIs only work there — <c>ShutdownBlockReasonDestroy</c> fails, silently, when
+    /// called from any other thread, which left the shutdown screen naming Captr long
+    /// after its recording had finished.
+    /// </summary>
+    public void Post(Action action)
+    {
+        _queued.Enqueue(action);
+        if (_hwnd != 0)
+        {
+            PInvoke.PostMessage((HWND)_hwnd, RunQueuedActions, 0, 0);
+        }
+    }
+
     /// <summary>
     /// Set while a <see cref="ShutdownBlock"/> is registered. WM_QUERYENDSESSION
     /// answers FALSE while this is true, which is what actually makes Windows WAIT
@@ -71,7 +103,7 @@ public sealed class MessageOnlyWindow : IDisposable
 
     private bool _shutdownBlocked;
 
-    public MessageOnlyWindow()
+    public SystemEventWindow()
     {
         _thread = new Thread(MessageLoop)
         {
@@ -102,16 +134,17 @@ public sealed class MessageOnlyWindow : IDisposable
                     {
                         lpfnWndProc = StaticWindowProcedure,
                         lpszClassName = className,
-                        hInstance = (HINSTANCE)Marshal.GetHINSTANCE(typeof(MessageOnlyWindow).Module),
+                        hInstance = (HINSTANCE)Marshal.GetHINSTANCE(typeof(SystemEventWindow).Module),
                     };
                     PInvoke.RegisterClass(in windowClass);
                 }
             }
 
-            // HWND_MESSAGE parent = a message-only window: no UI, just a mailbox.
+            // Top-level (no parent) so broadcasts reach it; a zero-size popup that is
+            // never shown, and a tool window so it can never appear on the taskbar.
             HWND hwnd = PInvoke.CreateWindowEx(
-                0, WindowClassName, "Captr host events", 0,
-                0, 0, 0, 0, HWND.HWND_MESSAGE, null, null, null);
+                WINDOW_EX_STYLE.WS_EX_TOOLWINDOW, WindowClassName, "Captr host events", WINDOW_STYLE.WS_POPUP,
+                0, 0, 0, 0, HWND.Null, null, null, null);
             if (hwnd.IsNull)
             {
                 _startupFailure = new InvalidOperationException("CreateWindowEx returned null.");
@@ -143,15 +176,33 @@ public sealed class MessageOnlyWindow : IDisposable
 
     private static unsafe LRESULT RouteMessage(HWND hwnd, uint message, WPARAM wParam, LPARAM lParam)
     {
-        return Instances.TryGetValue((nint)hwnd.Value, out MessageOnlyWindow? instance)
+        return Instances.TryGetValue((nint)hwnd.Value, out SystemEventWindow? instance)
             ? instance.WindowProcedure(hwnd, message, wParam, lParam)
             : PInvoke.DefWindowProc(hwnd, message, wParam, lParam);
     }
 
     private LRESULT WindowProcedure(HWND hwnd, uint message, WPARAM wParam, LPARAM lParam)
     {
+        MessageReceived?.Invoke(message);
+
         switch (message)
         {
+            case RunQueuedActions:
+                while (_queued.TryDequeue(out Action? action))
+                {
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception exception) when (exception is not OutOfMemoryException)
+                    {
+                        // A queued action must never take the message loop down with it.
+                        System.Diagnostics.Trace.TraceError("Queued window action failed: " + exception);
+                    }
+                }
+
+                return (LRESULT)0;
+
             case PInvoke.WM_POWERBROADCAST:
                 if (wParam == PInvoke.PBT_APMSUSPEND)
                 {

@@ -170,9 +170,11 @@ public sealed class SessionPlanner
         //    is whichever software tier the shipped build carries — libx264 when the
         //    GPL build is pinned, otherwise libopenh264.
         IReadOnlyList<string>? fallback = null;
+        string? fallbackCodec = null;
         FfmpegCapabilities capabilities = FfmpegCapabilities.LoadFrom(ffmpegPath);
         if (!encoderSelection.IsSoftware && EncoderCatalog.SoftwareFallback(capabilities) is { } softwareEncoder)
         {
+            fallbackCodec = softwareEncoder;
             ArrangementPlan arrangement = ArrangementPlanner.Plan(plan.Sources);
             fallback = FfmpegArgumentBuilder.Build(plan with
             {
@@ -215,7 +217,8 @@ public sealed class SessionPlanner
         var context = new RecordingSession.SessionContext(
             sessionId, workingFolder, ffmpegPath, ffprobePath, plan, fallback,
             encoderSelection.BytesPerHour, settings.ExcludedDisplayIds, quality.Name, speed.Name,
-            encoderSelection.FromCache ? encoderCache : null);
+            encoderSelection.FromCache ? encoderCache : null,
+            fallbackCodec);
 
         return (context, startEvent);
     }

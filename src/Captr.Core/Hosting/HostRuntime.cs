@@ -69,7 +69,7 @@ public sealed class HostRuntime
         try
         {
             var settingsStore = new SettingsStore();
-            using var systemEvents = new MessageOnlyWindow();
+            using var systemEvents = new SystemEventWindow();
             var transferQueue = new Transfers.TransferQueue();
             using var transferWorker = new Transfers.TransferWorker(transferQueue, settingsStore, log);
             var service = new HostService(settingsStore, systemEvents, log, transferQueue, transferWorker);

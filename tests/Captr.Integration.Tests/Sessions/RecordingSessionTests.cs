@@ -70,6 +70,38 @@ public class RecordingSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_heartbeat_that_cannot_be_written_does_not_cost_the_recording_its_finalisation()
+    {
+        // A virus scanner or backup tool holding heartbeat.json open for a moment made
+        // the heartbeat's atomic replace fail. That exception faulted the heartbeat
+        // task silently, and at Stop the session awaited it — the throw skipped
+        // finalisation entirely: no integrity record, no output, nothing transferred,
+        // and nothing logged.
+        CaptrSettings settings = CaptrSettings.CreateDefault() with { WorkingFolder = _root, FrameRate = 10 };
+        (RecordingSession.SessionContext context, SessionStarted startEvent) = await new SessionPlanner(Logger.None)
+            .PlanAsync(settings, null, null, null, label: null, TestContext.Current.CancellationToken);
+        RecordingSession session = RecordingSession.Create(context, startEvent, Logger.None);
+        Task<FinalizationResult> run = session.RunAsync(CancellationToken.None);
+
+        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        string heartbeat = Path.Combine(context.WorkingFolder, HeartbeatSnapshot.FileName);
+        await using (new FileStream(heartbeat, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            // Held without FileShare.Delete: every replace of the file fails meanwhile.
+            await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        session.RequestStop();
+        FinalizationResult result = await run.WaitAsync(TimeSpan.FromMinutes(2), TestContext.Current.CancellationToken);
+
+        result.OutputFiles.ShouldNotBeEmpty();
+        IntegrityRecord.ReadOrNull(context.WorkingFolder).ShouldNotBeNull();
+        SessionJournal.ReadAll(Path.Combine(context.WorkingFolder, SessionJournal.FileName))
+            .OfType<SessionFinalized>().ShouldHaveSingleItem();
+    }
+
+    [Fact]
     public async Task Starting_with_every_display_excluded_is_refused_with_a_clear_message()
     {
         var enumeratedIds = new Captr.Core.Displays.DisplayEnumerator()

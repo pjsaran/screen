@@ -278,7 +278,7 @@ public sealed class HostServiceStartTests : IDisposable
         {
         }
 
-        public void AttachSystemEvents(MessageOnlyWindow events)
+        public void AttachSystemEvents(SystemEventWindow events)
         {
         }
 

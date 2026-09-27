@@ -126,6 +126,72 @@ public class FinalizationPipelineTests : IDisposable
     }
 
     [Fact]
+    public async Task A_single_segment_recording_is_finalised_without_a_second_copy_of_the_footage()
+    {
+        // The output of a one-segment recording used to be a full COPY of it, doubling
+        // the footage on disk at exactly the moment a recording had stopped for lack
+        // of space. It is now a second name for the same bytes.
+        string folder = await RecordSessionAsync("single", seconds: 1, killHard: false);
+        Directory.GetFiles(folder, "seg-*.mkv").ShouldHaveSingleItem();
+
+        FinalizationResult result = await MakePipeline().RunAsync(folder, TestContext.Current.CancellationToken);
+
+        string output = result.OutputFiles.ShouldHaveSingleItem();
+        HardLinkNames(output).Count.ShouldBe(2, "the output and the segment are one file on disk");
+        (await IntegrityRecord.ReadOrNull(folder)!.VerifyAsync(folder, TestContext.Current.CancellationToken)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Without_room_to_join_the_recording_waits_intact_for_space_rather_than_failing_mid_write()
+    {
+        // Joining writes a file as large as all the segments beside them. After a
+        // stop for low disk there was not room, and the join died with an FFmpeg exit
+        // code. Now the room is checked first; the segments stay, the session stays
+        // unfinalised, and recovery completes it once space is freed.
+        string folder = await RecordSessionAsync("no-room", seconds: 5, killHard: false);
+        string[] segmentsBefore = Directory.GetFiles(folder, "seg-*.mkv");
+        segmentsBefore.Length.ShouldBeGreaterThan(1);
+        var pipeline = new FinalizationPipeline(_ffmpeg, _ffprobe, Logger.None, freeSpace: _ => 1_000_000);
+
+        NotEnoughSpaceToFinaliseException refusal = await Should.ThrowAsync<NotEnoughSpaceToFinaliseException>(
+            () => pipeline.RunAsync(folder, TestContext.Current.CancellationToken));
+
+        refusal.Message.ShouldContain("safe");
+        Directory.GetFiles(folder, "seg-*.mkv").ShouldBe(segmentsBefore, ignoreOrder: true);
+        SessionJournal.ReadAll(Path.Combine(folder, SessionJournal.FileName)).OfType<SessionFinalized>().ShouldBeEmpty();
+
+        FinalizationResult later = await MakePipeline().RunAsync(folder, TestContext.Current.CancellationToken);
+        later.OutputFiles.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task A_leftover_repair_scratch_file_is_not_mistaken_for_a_segment()
+    {
+        string folder = await RecordSessionAsync("leftover", seconds: 3, killHard: false);
+        string[] segments = Directory.GetFiles(folder, "seg-*.mkv");
+        File.Copy(segments[0], segments[0] + ".repaired.mkv");
+
+        FinalizationResult result = await MakePipeline().RunAsync(folder, TestContext.Current.CancellationToken);
+
+        result.SegmentCount.ShouldBe(segments.Length);
+    }
+
+    /// <summary>Every name the file is known by, via fsutil (no elevation needed).</summary>
+    private static List<string> HardLinkNames(string path)
+    {
+        var startInfo = new ProcessStartInfo("fsutil", ["hardlink", "list", path])
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true,
+        };
+        using Process process = Process.Start(startInfo)!;
+        string output = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return [.. output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+    }
+
+    [Fact]
     public async Task A_truncated_final_segment_is_repaired_and_the_original_kept()
     {
         string folder = await RecordSessionAsync("truncated", seconds: 5, killHard: true);

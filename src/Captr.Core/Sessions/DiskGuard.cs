@@ -39,13 +39,45 @@ public sealed class DiskGuard
     }
 
     /// <summary>Recording time the given free space allows at the measured rate.</summary>
-    public TimeSpan MinutesRemaining(long freeBytes)
+    /// <param name="freeBytes">Free space on the working folder's volume now.</param>
+    /// <param name="recordedBytes">What this session has recorded so far. Finalising
+    /// joins the segments into one file BESIDE them, so it needs that much space
+    /// again; see <see cref="RecordedBytes"/>.</param>
+    /// <remarks>
+    /// Two things are held back from the free space. The ballast — but only when it
+    /// is not already sitting on the disk: while held, the free space already excludes
+    /// it, and subtracting it again stopped recordings half a gigabyte early. And the
+    /// join: it used to be ignored entirely, so a recording stopped for a full disk
+    /// had exactly the room its own finalisation could not do without, and failed.
+    /// </remarks>
+    public TimeSpan MinutesRemaining(long freeBytes, long recordedBytes = 0)
     {
+        long reserve = (BallastHeld ? 0 : BallastBytes) + Math.Max(0, recordedBytes);
+
         // Capped rather than trusted: a very low measured rate on a large disk is
         // more hours than a TimeSpan can hold, and the overflow used to escape from
         // the status query — "how long have I got?" must never be what fails.
-        double hours = Math.Max(0, freeBytes - BallastBytes) / (double)_bytesPerHour;
+        double hours = Math.Max(0, freeBytes - reserve) / (double)_bytesPerHour;
         return hours >= TimeSpan.MaxValue.TotalHours ? TimeSpan.MaxValue : TimeSpan.FromHours(hours);
+    }
+
+    /// <summary>True while the ballast file is on disk for this working folder.</summary>
+    public bool BallastHeld => File.Exists(Path.Combine(_workingFolder, "ballast.bin"));
+
+    /// <summary>Bytes of footage recorded into this working folder so far — the size
+    /// of the file finalisation will write when it joins them.</summary>
+    public long RecordedBytes()
+    {
+        try
+        {
+            return Directory.EnumerateFiles(_workingFolder, "seg-*.mkv")
+                .Where(path => !path.Contains(".repaired.", StringComparison.Ordinal))
+                .Sum(path => new FileInfo(path).Length);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
     }
 
     /// <summary>
@@ -91,9 +123,9 @@ public sealed class DiskGuard
     /// <summary>Classifies the current free space. The session engine polls this and
     /// acts: Warning surfaces minutes remaining plus the one-click mitigations;
     /// Critical releases ballast and stops cleanly (SPEC §6).</summary>
-    public DiskVerdict Check(long freeBytes)
+    public DiskVerdict Check(long freeBytes, long recordedBytes = 0)
     {
-        TimeSpan remaining = MinutesRemaining(freeBytes);
+        TimeSpan remaining = MinutesRemaining(freeBytes, recordedBytes);
         if (remaining <= CriticalThreshold)
         {
             return new DiskVerdict(DiskState.Critical, remaining);

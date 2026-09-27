@@ -39,7 +39,7 @@ public interface IRecordingSession
 
     void ApplyDegradation(CaptrSettings degraded);
 
-    void AttachSystemEvents(MessageOnlyWindow events);
+    void AttachSystemEvents(SystemEventWindow events);
 
     Task<FinalizationResult> RunAsync(CancellationToken hostShutdown);
 }

@@ -19,6 +19,9 @@
          (the legacy VSTest path no longer exists on the .NET 10 SDK). -->
     <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
     <OutputType>Exe</OutputType>
+    <!-- A few tests talk to Windows directly (send a message to the host's event
+         window, broadcast a private message); the generated Win32 calls take pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!--

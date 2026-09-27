@@ -19,7 +19,7 @@ namespace Captr.Core.Hosting;
 public sealed class HostService : IHostOperations
 {
     private readonly SettingsStore _settingsStore;
-    private readonly MessageOnlyWindow? _systemEvents;
+    private readonly SystemEventWindow? _systemEvents;
     private readonly TransferQueue _transferQueue;
     private readonly TransferWorker? _transferWorker;
     private readonly ILogger _log;
@@ -46,7 +46,7 @@ public sealed class HostService : IHostOperations
 
     public HostService(
         SettingsStore settingsStore,
-        MessageOnlyWindow? systemEvents,
+        SystemEventWindow? systemEvents,
         ILogger log,
         TransferQueue? transferQueue = null,
         TransferWorker? transferWorker = null)
@@ -59,7 +59,7 @@ public sealed class HostService : IHostOperations
     /// <see cref="RecordingSession"/>.</param>
     internal HostService(
         SettingsStore settingsStore,
-        MessageOnlyWindow? systemEvents,
+        SystemEventWindow? systemEvents,
         ILogger log,
         TransferQueue? transferQueue,
         TransferWorker? transferWorker,
@@ -229,6 +229,13 @@ public sealed class HostService : IHostOperations
         catch (OperationCanceledException)
         {
             outcome = OutcomeOf(session);
+        }
+        catch (NotEnoughSpaceToFinaliseException exception)
+        {
+            // Not an internal error: the disk is full. The message says what to do.
+            _log.Warning("Session {SessionId} could not be finalised yet: {Reason}", session.Context.SessionId, exception.Message);
+            outcome = new SessionOutcome(
+                session.Context.SessionId, "failed", exception.Message, DateTimeOffset.UtcNow, session.Context.WorkingFolder);
         }
         catch (Exception exception)
         {
@@ -430,7 +437,7 @@ public sealed class HostService : IHostOperations
         var pipeline = new FinalizationPipeline(FfmpegLocator.FindFfmpeg(), FfmpegLocator.FindFfprobe(), _log);
         var scanner = new RecoveryScanner(pipeline, _log);
         IReadOnlyList<RecoveryReport> reports = await scanner.ScanAndRecoverAsync(
-            _settingsStore.Load().WorkingFolder, cancellationToken).ConfigureAwait(false);
+            _settingsStore.Load().WorkingFolder, cancellationToken, OwnedSessionFolders()).ConfigureAwait(false);
 
         foreach (RecoveryReport report in reports)
         {
@@ -822,6 +829,22 @@ public sealed class HostService : IHostOperations
         }
     }
 
+    /// <summary>Working folders of every session this host is still running or
+    /// finalising — recovery must never touch them.</summary>
+    private List<string> OwnedSessionFolders()
+    {
+        lock (_gate)
+        {
+            List<string> folders = [.. _finishing.Select(entry => entry.Session.Context.WorkingFolder)];
+            if (_session is not null && _sessionRun is { IsCompleted: false })
+            {
+                folders.Add(_session.Context.WorkingFolder);
+            }
+
+            return folders;
+        }
+    }
+
     /// <summary>The session that is actually recording (or paused) — the only one
     /// pause, resume, and settings changes can act on.</summary>
     private IRecordingSession? RecordingSessionOrNull()
@@ -888,7 +911,7 @@ public sealed class HostService : IHostOperations
         try
         {
             var guard = new DiskGuard(session.Context.WorkingFolder, session.Context.MeasuredBytesPerHour);
-            return guard.MinutesRemaining(guard.FreeBytesOnVolume()).TotalMinutes;
+            return guard.MinutesRemaining(guard.FreeBytesOnVolume(), guard.RecordedBytes()).TotalMinutes;
         }
         catch (IOException)
         {

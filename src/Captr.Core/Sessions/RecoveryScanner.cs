@@ -27,8 +27,10 @@ public sealed class RecoveryScanner
     /// A session that fails to recover is reported and left untouched for manual
     /// inspection — recovery must never make things worse.
     /// </summary>
+    /// <param name="inUse">Session folders a running session owns right now (the
+    /// caller's own recording, and any still finalising). Never touched.</param>
     public async Task<IReadOnlyList<RecoveryReport>> ScanAndRecoverAsync(
-        string workingRoot, CancellationToken cancellationToken)
+        string workingRoot, CancellationToken cancellationToken, IReadOnlyCollection<string>? inUse = null)
     {
         var reports = new List<RecoveryReport>();
         if (!Directory.Exists(workingRoot))
@@ -50,6 +52,17 @@ public sealed class RecoveryScanner
                 continue; // Unreadable or already finalised.
             }
 
+            // A session without a "finalised" entry is not necessarily a crashed one:
+            // it may be recording RIGHT NOW. `captr recover` used to treat the live
+            // recording as a crash - adopt its encoder, kill it, and finalise a folder
+            // still being written. Live means: owned by the caller, or heartbeating
+            // from a process that is still running.
+            if (IsLive(sessionFolder, inUse))
+            {
+                _log.Information("Skipping {Folder}: it belongs to a recording that is still running", sessionFolder);
+                continue;
+            }
+
             _log.Information("Recovering interrupted session in {Folder}", sessionFolder);
             try
             {
@@ -68,6 +81,36 @@ public sealed class RecoveryScanner
         }
 
         return reports;
+    }
+
+    /// <summary>How recently a heartbeat must have been written for its session to
+    /// count as running. The heartbeat is written every second.</summary>
+    internal static readonly TimeSpan LiveHeartbeatWindow = TimeSpan.FromSeconds(30);
+
+    private static bool IsLive(string sessionFolder, IReadOnlyCollection<string>? inUse)
+    {
+        string full = Path.GetFullPath(sessionFolder).TrimEnd(Path.DirectorySeparatorChar);
+        if (inUse is not null && inUse.Any(folder =>
+                string.Equals(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar), full, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (HeartbeatSnapshot.ReadOrNull(sessionFolder) is not { } heartbeat
+            || DateTimeOffset.UtcNow - heartbeat.WrittenUtc > LiveHeartbeatWindow)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var host = System.Diagnostics.Process.GetProcessById(heartbeat.HostProcessId);
+            return !host.HasExited;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            return false; // The process that wrote it is gone: a crash, which is ours to recover.
+        }
     }
 
     /// <summary>

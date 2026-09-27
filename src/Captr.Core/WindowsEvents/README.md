@@ -5,7 +5,7 @@ runs for hours unattended; everything Windows does in that time — sleep, lock,
 remote desktop, display changes, shutdown, clock jumps — arrives here as messages
 to a hidden window, and the session engine reacts.
 
-- **MessageOnlyWindow** — a `HWND_MESSAGE` window on its own thread. It receives:
+- **SystemEventWindow** — a `HWND_MESSAGE` window on its own thread. It receives:
   - `WM_POWERBROADCAST` — suspend (close the segment, flush the journal) and
     resume (new segment, record the gap);
   - `WM_WTSSESSION_CHANGE` — workstation lock/unlock (note it, keep recording —

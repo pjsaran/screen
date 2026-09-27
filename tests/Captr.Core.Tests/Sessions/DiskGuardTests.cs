@@ -74,5 +74,42 @@ public class DiskGuardTests : IDisposable
         File.Exists(ballast.FullName).ShouldBeFalse();
     }
 
+    [Fact]
+    public void The_ballast_is_not_counted_twice_while_it_sits_on_the_disk()
+    {
+        // While the ballast file exists, the free space reported by the volume has
+        // already had it taken out. Subtracting it again stopped every recording
+        // half a gigabyte early.
+        var guard = new DiskGuard(_dir, OneGbPerHour);
+        guard.ReserveBallast();
+
+        guard.MinutesRemaining(freeBytes: 2_000_000_000).ShouldBe(TimeSpan.FromHours(2));
+    }
+
+    [Fact]
+    public void Room_to_join_the_segments_is_kept_back_so_the_recording_can_be_finalised()
+    {
+        // Finalising writes the joined file beside the segments: as many bytes again
+        // as have been recorded. Ignoring that meant a recording stopped for low disk
+        // had no room left for its own finalisation.
+        var guard = new DiskGuard(_dir, OneGbPerHour);
+        guard.ReserveBallast();
+
+        DiskVerdict verdict = guard.Check(freeBytes: 3_000_000_000, recordedBytes: 2_950_000_000);
+
+        verdict.State.ShouldBe(DiskState.Critical, "3 GB free with 2.95 GB to join leaves three minutes");
+    }
+
+    [Fact]
+    public void Recorded_bytes_count_the_segments_and_nothing_else()
+    {
+        File.WriteAllBytes(Path.Combine(_dir, "seg-g01-000000.mkv"), new byte[1000]);
+        File.WriteAllBytes(Path.Combine(_dir, "seg-g01-000500.mkv"), new byte[500]);
+        File.WriteAllBytes(Path.Combine(_dir, "seg-g01-000000.mkv.repaired.mkv"), new byte[9999]);
+        File.WriteAllBytes(Path.Combine(_dir, "journal.ndjson"), new byte[9999]);
+
+        new DiskGuard(_dir, OneGbPerHour).RecordedBytes().ShouldBe(1500);
+    }
+
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 }

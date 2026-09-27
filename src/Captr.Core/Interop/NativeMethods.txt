@@ -99,3 +99,15 @@ CallNtPowerInformation
 GetProcessWindowStation
 GetUserObjectInformation
 USER_OBJECT_INFORMATION_INDEX
+
+// --- Hidden top-level event window (broadcasts reach only top-level windows) ---
+WM_APP
+WINDOW_STYLE
+WINDOW_EX_STYLE
+// Test seam only: a private broadcast proves the window receives broadcasts.
+RegisterWindowMessage
+SendMessageTimeout
+HWND_BROADCAST
+
+// --- Finalisation: a single-segment output is a hard link, not a second copy ---
+CreateHardLink

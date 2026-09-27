@@ -16,10 +16,10 @@ namespace Captr.Core.Sessions;
 /// session state (immutably where possible) and the command loop that serialises
 /// every state change: pause, resume, stop, suspend, topology change, frame-rate
 /// degradation. If it fails, the recording stops — so its loop records-and-continues
-/// rather than throwing (SPEC §12).
+/// rather than throwing (SPEC §12), and finalisation runs whatever happened before it.
 /// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable",
-    Justification = "The shutdown block is created and released entirely within RunAsync's lifetime; a session is not a disposable resource its callers hold.")]
+    Justification = "The shutdown block is created on the event window's thread when Windows asks, and released at the end of RunAsync; a session is not a disposable resource its callers hold.")]
 public sealed class RecordingSession : IRecordingSession
 {
     private readonly SessionContext _context;
@@ -40,15 +40,30 @@ public sealed class RecordingSession : IRecordingSession
     /// <summary>Held only while Windows is waiting for us to finish (SPEC §6).</summary>
     private ShutdownBlock? _shutdownBlock;
 
-    /// <summary>The event window whose ShutdownBlocked flag we must clear once
-    /// finalisation is done, so Windows can carry on shutting down.</summary>
-    private MessageOnlyWindow? _shutdownWindow;
+    /// <summary>Undo actions for the event-window subscriptions, run when the session
+    /// ends. The window lives as long as the host; a finished session left subscribed
+    /// kept answering "wait for me" to every later shutdown.</summary>
+    private readonly List<Action> _detachSystemEvents = [];
 
-    private RecordingSession(SessionContext context, SessionJournal journal, DiskGuard diskGuard, ILogger log)
+    /// <summary>Where displays come from: the real enumerator, or a test's list.</summary>
+    private readonly Func<IReadOnlyList<DisplayInfo>> _enumerateDisplays;
+
+    /// <summary>Set when a topology change left nothing to record: the next encoder
+    /// run waits for a display to come back instead of relaunching a stale plan.</summary>
+    private bool _waitingForDisplays;
+
+    /// <summary>Why the session stopped ITSELF (a nearly full disk), for the outcome
+    /// the host reports; null when a person, a schedule, or Windows stopped it.</summary>
+    private string? _selfStopReason;
+
+    private RecordingSession(
+        SessionContext context, SessionJournal journal, DiskGuard diskGuard, ILogger log,
+        Func<IReadOnlyList<DisplayInfo>>? enumerateDisplays = null)
     {
         _context = context;
         _journal = journal;
         _diskGuard = diskGuard;
+        _enumerateDisplays = enumerateDisplays ?? (() => new DisplayEnumerator().Enumerate());
         _plan = context.InitialPlan;
         CurrentQuality = context.QualityName;
         CurrentSpeedPreset = context.SpeedPresetName;
@@ -109,12 +124,20 @@ public sealed class RecordingSession : IRecordingSession
         IReadOnlyList<string> ExcludedDisplayIds,
         string QualityName,
         string SpeedPresetName,
-        EncoderCache? CacheToInvalidateOnEarlyFailure = null);
+        EncoderCache? CacheToInvalidateOnEarlyFailure = null,
+        string? SoftwareFallbackCodec = null);
 
     /// <summary>Creates the session: journal, ballast, initial state. The caller
     /// (host) then invokes <see cref="RunAsync"/> exactly once.</summary>
     public static RecordingSession Create(
-        SessionContext context, SessionStarted startEvent, ILogger log)
+        SessionContext context, SessionStarted startEvent, ILogger log) =>
+        Create(context, startEvent, log, enumerateDisplays: null);
+
+    /// <param name="enumerateDisplays">Test seam: the displays a topology change or a
+    /// settings change resolves against. Null means the machine's real displays.</param>
+    internal static RecordingSession Create(
+        SessionContext context, SessionStarted startEvent, ILogger log,
+        Func<IReadOnlyList<DisplayInfo>>? enumerateDisplays)
     {
         SessionJournal journal = SessionJournal.CreateNew(context.WorkingFolder, startEvent);
 
@@ -137,7 +160,7 @@ public sealed class RecordingSession : IRecordingSession
 
         var diskGuard = new DiskGuard(context.WorkingFolder, context.MeasuredBytesPerHour);
         diskGuard.ReserveBallast();
-        return new RecordingSession(context, journal, diskGuard, log);
+        return new RecordingSession(context, journal, diskGuard, log, enumerateDisplays);
     }
 
     // ---- Commands (safe from any thread; the loop serialises them) --------------
@@ -163,29 +186,24 @@ public sealed class RecordingSession : IRecordingSession
     public void RequestResume() => Post(SessionCommand.Resume);
 
     /// <summary>Wires the Windows event window's signals into session commands.</summary>
-    public void AttachSystemEvents(MessageOnlyWindow events)
+    public void AttachSystemEvents(SystemEventWindow events)
     {
-        events.SuspendRequested += () => Post(SessionCommand.Suspend);
-        events.Resumed += () => Post(SessionCommand.ResumeFromSuspend);
-        events.DisplayChanged += () => Post(SessionCommand.TopologyChanged);
-        events.TimeChanged += () => Post(SessionCommand.ClockChanged);
+        Action suspend = () => Post(SessionCommand.Suspend);
+        Action resumed = () => Post(SessionCommand.ResumeFromSuspend);
+        Action displayChanged = () => Post(SessionCommand.TopologyChanged);
+        Action timeChanged = () => Post(SessionCommand.ClockChanged);
 
         // Windows is shutting down or logging off. SPEC §6: register a shutdown
         // block reason (so Windows waits AND the user can see why), finalise
         // quickly, then release it — the block is disposed when RunAsync finishes.
-        events.EndSessionRequested += () =>
+        // This handler runs on the window's thread, which is where the reason must
+        // be created.
+        Action endSession = () =>
         {
-            if (_shutdownBlock is null)
-            {
-                _shutdownBlock = new ShutdownBlock(
-                    events.Handle, "Captr is finishing the recording so no footage is lost.");
-                events.ShutdownBlocked = true;
-                _shutdownWindow = events;
-            }
-
+            _shutdownBlock ??= new ShutdownBlock(events, "Captr is finishing the recording so no footage is lost.");
             Post(SessionCommand.Stop);
         };
-        events.SessionChanged += kind => Post(kind switch
+        Action<SessionChangeKind> sessionChanged = kind => Post(kind switch
         {
             // Lock: record it, keep recording — never stop (SPEC §6).
             SessionChangeKind.SessionLock => SessionCommand.NoteLocked,
@@ -202,6 +220,45 @@ public sealed class RecordingSession : IRecordingSession
                 SessionCommand.NoteConsoleLost,
             _ => SessionCommand.NoteConsoleReturned,
         });
+
+        events.SuspendRequested += suspend;
+        events.Resumed += resumed;
+        events.DisplayChanged += displayChanged;
+        events.TimeChanged += timeChanged;
+        events.EndSessionRequested += endSession;
+        events.SessionChanged += sessionChanged;
+        _detachSystemEvents.Add(() =>
+        {
+            events.SuspendRequested -= suspend;
+            events.Resumed -= resumed;
+            events.DisplayChanged -= displayChanged;
+            events.TimeChanged -= timeChanged;
+            events.EndSessionRequested -= endSession;
+            events.SessionChanged -= sessionChanged;
+        });
+    }
+
+    /// <summary>
+    /// Releases what Create took — the journal and the ballast — for a
+    /// session that will never be run (tests that exercise the command handling
+    /// directly). <see cref="RunAsync"/> releases them itself.
+    /// </summary>
+    internal void ReleaseWithoutRunning()
+    {
+        DetachSystemEvents();
+        _diskGuard.ReleaseBallast();
+        _journal.Dispose();
+    }
+
+    /// <summary>Stops listening to the event window. Idempotent.</summary>
+    internal void DetachSystemEvents()
+    {
+        foreach (Action detach in _detachSystemEvents)
+        {
+            detach();
+        }
+
+        _detachSystemEvents.Clear();
     }
 
     private void Post(SessionCommand command) => _commands.Writer.TryWrite(command);
@@ -217,7 +274,11 @@ public sealed class RecordingSession : IRecordingSession
 
         var tracker = new SegmentTracker(_context.WorkingFolder, _journal, () => _arrangementGroup);
         using var trackerCts = new CancellationTokenSource();
-        Task trackerTask = tracker.RunAsync(trackerCts.Token);
+
+        // Neither helper may take the recording down with it: a heartbeat file held
+        // open by a virus scanner, or a transient listing failure, used to fault its
+        // task silently — and the await on it below then threw past finalisation.
+        Task trackerTask = KeepGoingAsync(() => tracker.RunAsync(trackerCts.Token), "segment tracker");
         Task heartbeatTask = HeartbeatLoopAsync(trackerCts.Token);
 
         string? failure = null;
@@ -228,20 +289,40 @@ public sealed class RecordingSession : IRecordingSession
             bool running = true;
             while (running)
             {
-                using var runCts = CancellationTokenSource.CreateLinkedTokenSource(sessionCts.Token);
-                var spec = new EncoderRunSpec(
-                    FfmpegArgumentBuilder.Build(_plan with { ArrangementGroup = _arrangementGroup }),
-                    _context.SoftwareFallbackArguments,
-                    _context.WorkingFolder);
+                if (_waitingForDisplays && !await WaitForDisplaysAsync(sessionCts.Token).ConfigureAwait(false))
+                {
+                    break; // Stopped while there was nothing to record.
+                }
 
-                Task<SupervisionOutcome> runTask = _supervisor.RunAsync(spec, null, runCts.Token);
-                SessionCommand? interrupting = await PumpCommandsUntilRunEndsAsync(runTask, runCts).ConfigureAwait(false);
+                using var runCts = CancellationTokenSource.CreateLinkedTokenSource(sessionCts.Token);
+                Task<SupervisionOutcome> runTask = _supervisor.RunAsync(BuildRunSpec(), null, runCts.Token);
+                SessionCommand? interrupting;
+                try
+                {
+                    interrupting = await PumpCommandsUntilRunEndsAsync(runTask, runCts).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // The command pump failed (the journal became unwritable, a
+                    // display query threw). The encoder must NOT be left running
+                    // unsupervised: stop it, and finalise what exists.
+                    _log.Error(exception, "The session's command loop failed; stopping the encoder and finalising");
+                    failure = "Captr hit an internal error while recording and stopped: " + exception.Message;
+                    await runCts.CancelAsync().ConfigureAwait(false);
+                    interrupting = SessionCommand.Stop;
+                }
+
                 SupervisionOutcome outcome = await runTask.ConfigureAwait(false);
 
                 if (outcome.Kind == SupervisionEndKind.FailedLoudly)
                 {
                     failure = outcome.FailureReason;
                     ForgetCachedEncoderIfItFailedImmediately(recordingStartedUtc);
+                    break;
+                }
+
+                if (failure is not null)
+                {
                     break;
                 }
 
@@ -282,21 +363,30 @@ public sealed class RecordingSession : IRecordingSession
                 }
             }
         }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Anything between encoder runs (a rebuild, a pause, a resume). Whatever
+            // it was, what has been recorded is finalised below, not abandoned.
+            _log.Error(exception, "The session loop failed; finalising what was recorded");
+            failure ??= "Captr hit an internal error while recording and stopped: " + exception.Message;
+        }
         finally
         {
             _state = SessionState.Finalizing;
+            DetachSystemEvents();
             await trackerCts.CancelAsync().ConfigureAwait(false);
             await Task.WhenAll(trackerTask, heartbeatTask).ConfigureAwait(false);
             executionState.Release();
-            _diskGuard.ReleaseBallast();
-            _journal.Dispose();
+            BestEffort(_diskGuard.ReleaseBallast, "release the disk reserve");
+            BestEffort(_journal.Dispose, "close the journal");
         }
 
         try
         {
+            FailureReason = failure ?? _selfStopReason;
             var pipeline = new FinalizationPipeline(_context.FfmpegPath, _context.FfprobePath, _log);
             FinalizationResult result = await pipeline.RunAsync(_context.WorkingFolder, CancellationToken.None).ConfigureAwait(false);
-            FailureReason = failure;
+            failure ??= _selfStopReason;
             _state = failure is null ? SessionState.Completed : SessionState.Failed;
 
             if (failure is not null)
@@ -314,14 +404,176 @@ public sealed class RecordingSession : IRecordingSession
             // whole point: the recording is safely closed before the machine goes
             // down (SPEC §6). Order matters: clear the window flag first so a repeat
             // query is answered TRUE, then destroy the reason.
-            if (_shutdownWindow is not null)
-            {
-                _shutdownWindow.ShutdownBlocked = false;
-                _shutdownWindow = null;
-            }
-
             _shutdownBlock?.Dispose();
             _shutdownBlock = null;
+        }
+    }
+
+    /// <summary>
+    /// The arguments for the next encoder run, built from the CURRENT plan — displays,
+    /// frame rate, quality, and arrangement group as they are now.
+    /// </summary>
+    /// <remarks>
+    /// The software fallback used to be built once, at start, and reused for every
+    /// run. After a topology change, a settings change, or an automatic frame-rate
+    /// reduction, falling back therefore recorded the ORIGINAL displays (an excluded
+    /// one included, or a stale output index) at the original rate, into segments
+    /// named for arrangement group 1 — which finalisation then joined with a
+    /// different canvas. And once the session had fallen back, the next run (after a
+    /// pause, say) went straight back to the hardware encoder that had just failed.
+    /// Now the fallback is rebuilt every run, and a session that has fallen back
+    /// stays on the software encoder with no further rung, exactly as SPEC §6 says.
+    /// </remarks>
+    internal EncoderRunSpec BuildRunSpec()
+    {
+        RecordingPlan current = _plan with { ArrangementGroup = _arrangementGroup };
+        IReadOnlyList<string> primary = FfmpegArgumentBuilder.Build(current);
+
+        if (_context.SoftwareFallbackCodec is not { } codec)
+        {
+            // No software rung (the encoder IS software, or the build has none).
+            return new EncoderRunSpec(primary, null, _context.WorkingFolder);
+        }
+
+        ArrangementPlan arrangement = ArrangementPlanner.Plan(current.Sources);
+        IReadOnlyList<string> fallback = FfmpegArgumentBuilder.Build(current with
+        {
+            Encoder = new EncoderSettings(codec, QualityLevels.BuildEncoderArguments(
+                codec, SpeedPresets.FindOrDefault(CurrentSpeedPreset), QualityLevels.FindOrDefault(CurrentQuality),
+                arrangement.CanvasWidth, arrangement.CanvasHeight, current.FrameRate)),
+        });
+
+        return _supervisor.HasFallenBack
+            ? new EncoderRunSpec(fallback, null, _context.WorkingFolder)
+            : new EncoderRunSpec(primary, fallback, _context.WorkingFolder);
+    }
+
+    /// <summary>
+    /// Every display went away: wait for one to come back (or for Stop) rather than
+    /// relaunching an encoder at outputs that no longer exist. The wait is journaled
+    /// as a gap, like any other time nothing was being recorded.
+    /// </summary>
+    /// <returns>False when the session was stopped while waiting.</returns>
+    private async Task<bool> WaitForDisplaysAsync(CancellationToken cancellationToken)
+    {
+        DateTimeOffset since = DateTimeOffset.UtcNow;
+        await foreach (SessionCommand command in _commands.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (command == SessionCommand.Stop)
+            {
+                _state = SessionState.Stopping;
+                JournalGap(since, "no display to record");
+                return false;
+            }
+
+            if (command == SessionCommand.TopologyChanged)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None).ConfigureAwait(false);
+                DrainPending(SessionCommand.TopologyChanged);
+                RebuildForNewTopology();
+                if (!_waitingForDisplays)
+                {
+                    JournalGap(since, "no display to record");
+                    return true;
+                }
+
+                continue;
+            }
+
+            HandleWhileIdle(command);
+        }
+
+        return false;
+    }
+
+    private void JournalGap(DateTimeOffset since, string reason) =>
+        _journal.Append(new GapRecorded
+        {
+            TimestampUtc = DateTimeOffset.UtcNow,
+            GapStartUtc = since,
+            Duration = DateTimeOffset.UtcNow - since,
+            Reason = reason,
+        });
+
+    /// <summary>Runs a helper loop, logging (never propagating) anything it throws.</summary>
+    private async Task KeepGoingAsync(Func<Task> loop, string what)
+    {
+        try
+        {
+            await loop().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            _log.Error(exception, "The {What} stopped unexpectedly; the recording continues without it", what);
+        }
+    }
+
+    private void BestEffort(Action action, string what)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _log.Warning(exception, "Could not {What}; finalisation continues", what);
+        }
+    }
+
+    /// <summary>
+    /// A command that arrives while nothing is encoding — paused, suspended, or
+    /// waiting for a display. These used to be read and thrown away, so a display
+    /// excluded while the recording was paused was recorded again after Resume, and
+    /// the user had been told "saved and applied".
+    /// </summary>
+    /// <returns>True when the command was dealt with here.</returns>
+    internal bool HandleWhileIdle(SessionCommand command)
+    {
+        switch (command)
+        {
+            case SessionCommand.ApplyDegradation:
+                ApplyPendingDegradation();
+                return true;
+            case SessionCommand.TopologyChanged:
+                DrainPending(SessionCommand.TopologyChanged);
+                RebuildForNewTopology();
+                return true;
+            case SessionCommand.ReduceFrameRate:
+                // Nothing is encoding, so nothing is falling behind.
+                return true;
+            case SessionCommand.ClockChanged or SessionCommand.NoteLocked or SessionCommand.NoteUnlocked
+                or SessionCommand.NoteConsoleLost or SessionCommand.NoteConsoleReturned:
+                HandleNote(command);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void HandleNote(SessionCommand command)
+    {
+        switch (command)
+        {
+            case SessionCommand.NoteLocked:
+                Note("Workstation locked — recording continues.");
+                break;
+            case SessionCommand.NoteUnlocked:
+                Note("Workstation unlocked.");
+                break;
+            case SessionCommand.NoteConsoleLost:
+                Note("The desktop was disconnected (someone closed the remote session, or the console " +
+                     "was handed over). Recording keeps running and resumes on its own when the desktop " +
+                     "comes back; the time in between is recorded as a gap.");
+                break;
+            case SessionCommand.NoteConsoleReturned:
+                Note("The desktop is back — capture resumes.");
+                break;
+            case SessionCommand.ClockChanged:
+                _journal.Append(new ClockJumped { TimestampUtc = DateTimeOffset.UtcNow, ApparentJump = TimeSpan.Zero });
+                break;
         }
     }
 
@@ -363,22 +615,9 @@ public sealed class RecordingSession : IRecordingSession
 
             switch (command)
             {
-                case SessionCommand.NoteLocked:
-                    Note("Workstation locked — recording continues.");
-                    break;
-                case SessionCommand.NoteUnlocked:
-                    Note("Workstation unlocked.");
-                    break;
-                case SessionCommand.NoteConsoleLost:
-                    Note("The desktop was disconnected (someone closed the remote session, or the console " +
-                         "was handed over). Recording keeps running and resumes on its own when the desktop " +
-                         "comes back; the time in between is recorded as a gap.");
-                    break;
-                case SessionCommand.NoteConsoleReturned:
-                    Note("The desktop is back — capture resumes.");
-                    break;
-                case SessionCommand.ClockChanged:
-                    _journal.Append(new ClockJumped { TimestampUtc = DateTimeOffset.UtcNow, ApparentJump = TimeSpan.Zero });
+                case SessionCommand.NoteLocked or SessionCommand.NoteUnlocked or SessionCommand.NoteConsoleLost
+                    or SessionCommand.NoteConsoleReturned or SessionCommand.ClockChanged:
+                    HandleNote(command);
                     break;
                 case SessionCommand.Resume:
                     break; // Not paused — nothing to resume.
@@ -403,7 +642,7 @@ public sealed class RecordingSession : IRecordingSession
             _ => _state,
         };
 
-    private async Task WaitWhilePausedAsync(CancellationToken cancellationToken)
+    internal async Task WaitWhilePausedAsync(CancellationToken cancellationToken)
     {
         _journal.Append(new PauseStarted { TimestampUtc = DateTimeOffset.UtcNow });
         _log.Information("Recording paused — the pause is journaled and will show as a paused gap");
@@ -424,6 +663,8 @@ public sealed class RecordingSession : IRecordingSession
                 _state = SessionState.Stopping;
                 return;
             }
+
+            HandleWhileIdle(command);
         }
     }
 
@@ -456,24 +697,34 @@ public sealed class RecordingSession : IRecordingSession
 
                 return;
             }
+
+            HandleWhileIdle(command);
         }
     }
 
-    private void RebuildForNewTopology()
+    internal void RebuildForNewTopology()
     {
-        // Re-resolve stable identities to fresh indices (SPEC §5/§6): the exclusion
-        // set from session start still applies; a display attached mid-session is
-        // included by default, exactly as at start.
-        IReadOnlyList<DisplayInfo> displays = new DisplayEnumerator().Enumerate();
-        ResolvedSelection selection = DisplaySelection.Resolve(displays, _context.ExcludedDisplayIds, []);
+        // Re-resolve stable identities to fresh indices (SPEC §5/§6) against the
+        // exclusions AS THEY ARE NOW. This used the set from session start, so a
+        // display the user excluded mid-recording came back the next time any
+        // monitor was plugged in, switched on, or changed resolution. A display
+        // attached mid-session is included by default, exactly as at start.
+        IReadOnlyList<DisplayInfo> displays = _enumerateDisplays();
+        ResolvedSelection selection = DisplaySelection.Resolve(displays, CurrentExcludedDisplayIds, []);
         List<DisplayInfo> stillWanted = [.. selection.Included];
 
         if (stillWanted.Count == 0)
         {
-            Note("All displays lost after topology change; waiting for the next change.");
+            if (!_waitingForDisplays)
+            {
+                Note("Every display is gone or deselected; recording waits for a display to come back.");
+            }
+
+            _waitingForDisplays = true;
             return;
         }
 
+        _waitingForDisplays = false;
         _arrangementGroup++;
         _plan = _plan with
         {
@@ -551,7 +802,7 @@ public sealed class RecordingSession : IRecordingSession
 
         // Displays: re-resolve against the NEW exclusion set. Removing a display
         // changes the canvas, which is why this rolls a group.
-        IReadOnlyList<DisplayInfo> attached = new DisplayEnumerator().Enumerate();
+        IReadOnlyList<DisplayInfo> attached = _enumerateDisplays();
         ResolvedSelection selection = DisplaySelection.Resolve(attached, degraded.ExcludedDisplayIds, []);
         IReadOnlyList<CaptureSource> sources = selection.Included.Count > 0
             ? [.. selection.Included.Select(d =>
@@ -618,7 +869,20 @@ public sealed class RecordingSession : IRecordingSession
 
     private bool CheckDisk()
     {
-        DiskVerdict verdict = _diskGuard.Check(_diskGuard.FreeBytesOnVolume());
+        long freeBytes;
+        try
+        {
+            freeBytes = _diskGuard.FreeBytesOnVolume();
+        }
+        catch (IOException exception)
+        {
+            // An unmeasurable volume (a share that stopped answering) is not a reason
+            // to stop recording; the next check tries again.
+            _log.Warning("Free disk space could not be measured: {Reason}", exception.Message);
+            return true;
+        }
+
+        DiskVerdict verdict = _diskGuard.Check(freeBytes, _diskGuard.RecordedBytes());
         switch (verdict.State)
         {
             case DiskState.Warning:
@@ -629,6 +893,10 @@ public sealed class RecordingSession : IRecordingSession
                 _diskGuard.ReleaseBallast();
                 Note($"Disk critically low ({verdict.RecordingTimeRemaining.TotalMinutes:F0} minutes remaining) — stopping cleanly. A clean stop beats a disk-full crash.");
                 _log.Error("Disk critically low — stopping the recording cleanly");
+                _selfStopReason =
+                    "The disk holding the working folder was nearly full, so Captr stopped the recording cleanly " +
+                    "rather than let it fail. Everything up to that point is saved. Free some space, or choose a " +
+                    "working folder on a bigger drive in Settings.";
                 return false;
             default:
                 return true;
@@ -637,16 +905,32 @@ public sealed class RecordingSession : IRecordingSession
 
     private async Task HeartbeatLoopAsync(CancellationToken cancellationToken)
     {
+        bool warned = false;
         while (!cancellationToken.IsCancellationRequested)
         {
-            new HeartbeatSnapshot
+            try
             {
-                SessionId = _context.SessionId,
-                WrittenUtc = DateTimeOffset.UtcNow,
-                State = _state.ToString(),
-                HostProcessId = Environment.ProcessId,
-                EncodedTime = _supervisor.LatestProgress?.OutTime,
-            }.Write(_context.WorkingFolder);
+                new HeartbeatSnapshot
+                {
+                    SessionId = _context.SessionId,
+                    WrittenUtc = DateTimeOffset.UtcNow,
+                    State = _state.ToString(),
+                    HostProcessId = Environment.ProcessId,
+                    EncodedTime = _supervisor.LatestProgress?.OutTime,
+                }.Write(_context.WorkingFolder);
+                warned = false;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // A missed heartbeat costs nothing: the next second writes another.
+                // Letting it escape used to fault this task and, at Stop, abandon
+                // finalisation altogether.
+                if (!warned)
+                {
+                    _log.Warning("The heartbeat could not be written (it is retried every second): {Reason}", exception.Message);
+                    warned = true;
+                }
+            }
 
             try
             {
@@ -670,7 +954,7 @@ public sealed class RecordingSession : IRecordingSession
         }
     }
 
-    private enum SessionCommand
+    internal enum SessionCommand
     {
         Stop,
         Pause,

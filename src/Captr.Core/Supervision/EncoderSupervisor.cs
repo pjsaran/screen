@@ -28,6 +28,10 @@ public sealed class EncoderSupervisor
     private EncoderProgress? _latestProgress;
     private bool _slowWarningRaised;
 
+    /// <summary>True once this session has used its one fallback to the software
+    /// encoder; later runs stay on software (SPEC §6: one rung, never back up).</summary>
+    public bool HasFallenBack => _policy.HasFallenBack;
+
     public EncoderSupervisor(string ffmpegPath, SessionJournal journal, ILogger log)
     {
         _ffmpegPath = ffmpegPath;
@@ -62,6 +66,11 @@ public sealed class EncoderSupervisor
         int reportLogLevel = 24)
     {
         IReadOnlyList<string> currentArguments = spec.PrimaryArguments;
+
+        // Each run may lower the frame rate once more if it is still too slow: the
+        // warning used to fire once per SESSION, so the rate fell a single step
+        // (15 -> 10) and never again, however far behind the encoder stayed.
+        _slowWarningRaised = false;
         FfmpegProcess? process = adoptedProcess;
         var pendingGap = new PendingGap();
         var captureOutage = new CaptureOutage();
