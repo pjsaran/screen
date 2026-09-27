@@ -100,6 +100,14 @@ carries the meaning, since recording and error are both red. §9's actual requir
 ("unmistakable at a glance") is met better standing still, and nothing runs a timer
 for the length of a recording.
 
+*Note (DOC-1): this entry and "The tray icon blinks while recording; a static icon
+was tried and rejected" below contradict each other, and the later one describes
+the code. `TrayPresenter` alternates a bright and a dim recording icon every 800 ms
+while the state is `recording`, and only then. Starting, stopping, finalising, and
+completed hold the bright icon still; paused and suspended show the paused icon; a
+recording that stopped on its own shows the error icon; idle shows the idle icon.
+Both entries are kept as the record of the decision and its reversal.*
+
 **The status page is called Home.** It is the page the application opens on and the
 one people return to, and "Status" described the top card rather than the page.
 
