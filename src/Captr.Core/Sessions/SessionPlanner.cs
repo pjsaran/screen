@@ -39,6 +39,14 @@ public sealed class SessionPlanner
         string? label,
         CancellationToken cancellationToken)
     {
+        // 0. There must be a desktop to capture. In session 0 (a task set to "Run
+        //    whether user is logged on or not", or a service) everything else would
+        //    succeed and every frame would be black - so refuse before doing anything.
+        if (WindowsEvents.InteractiveSession.WhyCaptureIsImpossible() is { } noDesktop)
+        {
+            throw new SessionStartException(noDesktop);
+        }
+
         // 1. Settings must be valid (SPEC §8: block starting with a specific message).
         IReadOnlyList<SettingsError> errors = SettingsValidator.Validate(settings);
         if (errors.Count > 0)

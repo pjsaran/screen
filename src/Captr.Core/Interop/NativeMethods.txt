@@ -94,3 +94,8 @@ POWER_REQUEST_CONTEXT_VERSION
 // Read-only: lets the tests observe the machine's real execution state.
 CallNtPowerInformation
 
+// --- Where this process runs: session 0 and non-interactive window stations have no
+// desktop to capture. See WindowsEvents/InteractiveSession.
+GetProcessWindowStation
+GetUserObjectInformation
+USER_OBJECT_INFORMATION_INDEX
