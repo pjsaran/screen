@@ -39,8 +39,14 @@ public sealed class DiskGuard
     }
 
     /// <summary>Recording time the given free space allows at the measured rate.</summary>
-    public TimeSpan MinutesRemaining(long freeBytes) =>
-        TimeSpan.FromHours(Math.Max(0, freeBytes - BallastBytes) / (double)_bytesPerHour);
+    public TimeSpan MinutesRemaining(long freeBytes)
+    {
+        // Capped rather than trusted: a very low measured rate on a large disk is
+        // more hours than a TimeSpan can hold, and the overflow used to escape from
+        // the status query — "how long have I got?" must never be what fails.
+        double hours = Math.Max(0, freeBytes - BallastBytes) / (double)_bytesPerHour;
+        return hours >= TimeSpan.MaxValue.TotalHours ? TimeSpan.MaxValue : TimeSpan.FromHours(hours);
+    }
 
     /// <summary>
     /// The pre-start gate: refuses with a concrete message stating what is needed
@@ -98,8 +104,13 @@ public sealed class DiskGuard
             : new DiskVerdict(DiskState.Ok, remaining);
     }
 
-    /// <summary>Free bytes on the volume that holds the working folder.</summary>
-    public long FreeBytesOnVolume() => new DriveInfo(Path.GetPathRoot(_workingFolder)!).AvailableFreeSpace;
+    /// <summary>Free bytes on the volume that holds the working folder — UNC shares
+    /// and folder mount points included (see <see cref="Common.FreeSpace"/>).</summary>
+    /// <exception cref="IOException">The volume cannot be measured right now (an
+    /// unreachable share); callers decide what an unknown answer means.</exception>
+    public long FreeBytesOnVolume() =>
+        Common.FreeSpace.AvailableBytes(_workingFolder)
+        ?? throw new IOException($"The free space at {_workingFolder} could not be measured.");
 }
 
 /// <summary>Pre-start gate result; the message states exactly what is needed.</summary>

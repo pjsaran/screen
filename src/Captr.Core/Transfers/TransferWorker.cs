@@ -115,11 +115,40 @@ public sealed class TransferWorker : IDisposable
                 continue;
             }
 
-            await TransferOneAsync(item, cancellationToken).ConfigureAwait(false);
+            bool attempted;
+            try
+            {
+                attempted = await TransferOneAsync(item, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // TransferOneAsync lands every outcome in the queue itself; reaching
+                // here means even THAT failed (the database is locked or damaged).
+                // The loop must survive it: a dead worker used to strand every
+                // transfer until the host restarted, with nothing in the log.
+                _log.Error(exception, "The transfer worker could not process transfer {Id}; trying again shortly", item.Id);
+                attempted = false;
+            }
+
+            if (!attempted)
+            {
+                // Nothing changed on the row, so NextDue would hand it straight back:
+                // wait before looking again instead of spinning.
+                try
+                {
+                    await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
         }
     }
 
     /// <summary>One attempt at one item; every outcome lands back in the queue.</summary>
+    /// <returns>False when no attempt was made (settings unreadable, or the item was
+    /// stopped before it could be claimed), so the caller can pause before looking again.</returns>
     /// <remarks>
     /// <para>
     /// The attempt is bounded by <see cref="AttemptTimeoutFor"/>. Without it, a share
@@ -136,7 +165,7 @@ public sealed class TransferWorker : IDisposable
     /// than letting it run to completion against the user's wishes.
     /// </para>
     /// </remarks>
-    public async Task TransferOneAsync(TransferItem item, CancellationToken cancellationToken)
+    public async Task<bool> TransferOneAsync(TransferItem item, CancellationToken cancellationToken)
     {
         RetrySettings retries;
         DestinationSettings? destination;
@@ -146,13 +175,18 @@ public sealed class TransferWorker : IDisposable
             retries = settings.Retries;
             destination = settings.Destinations.FirstOrDefault(d => d.Name == item.DestinationName);
         }
-        catch (SettingsValidationException exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            _log.Error(exception, "Settings are invalid; transfers are paused until they are fixed");
-            return;
+            _log.Error(exception, "Settings could not be read; transfers wait until they can be");
+            return false;
         }
 
-        _queue.MarkInProgress(item.Id);
+        // Claimed only if still waiting: a Stop pressed between NextDue and here used
+        // to be overwritten, and the transfer ran anyway.
+        if (!_queue.MarkInProgress(item.Id))
+        {
+            return false;
+        }
 
         TimeSpan timeout = AttemptTimeoutFor(item.OutputPath);
         using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -168,7 +202,16 @@ public sealed class TransferWorker : IDisposable
             {
                 if (Find(item.Id)?.State == TransferQueue.StateCancelled)
                 {
-                    attemptCts.Cancel();
+                    try
+                    {
+                        attemptCts.Cancel();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // The attempt finished while this tick was already running.
+                        // Timer.Dispose does not wait for a callback in flight, and an
+                        // exception escaping a timer callback terminates the process.
+                    }
                 }
             },
             null, StopCheckInterval, StopCheckInterval);
@@ -180,14 +223,14 @@ public sealed class TransferWorker : IDisposable
                 _queue.Fail(item.Id, FailureKind.Permanent,
                     $"Destination '{item.DestinationName}' no longer exists or is disabled.",
                     DateTimeOffset.UtcNow, null, retries);
-                return;
+                return true;
             }
 
             if (!File.Exists(item.OutputPath))
             {
                 _queue.Fail(item.Id, FailureKind.Permanent,
                     $"The local file is missing: {item.OutputPath}", DateTimeOffset.UtcNow, null, retries);
-                return;
+                return true;
             }
 
             // The destination may give this file its own name; when it does not, the
@@ -214,7 +257,7 @@ public sealed class TransferWorker : IDisposable
                     _queue.Fail(item.Id, FailureKind.Permanent,
                         $"Captr cannot send to {DestinationKinds.Describe(destination.Kind).DisplayName} yet.",
                         DateTimeOffset.UtcNow, null, retries);
-                    return;
+                    return true;
             }
 
             _queue.Complete(item.Id);
@@ -233,7 +276,7 @@ public sealed class TransferWorker : IDisposable
                 // The user pressed Stop. The row already says so; overwriting it with
                 // a failure would replace their decision with an error message.
                 _log.Information("Transfer {Id} stopped mid-flight at the user's request", item.Id);
-                return;
+                return true;
             }
 
             // Our own deadline, not a host shutdown: the transfer made no progress
@@ -252,7 +295,46 @@ public sealed class TransferWorker : IDisposable
             _log.Warning("Transfer {Id} failed transiently on attempt {Attempt} of {Max}: {Message}",
                 item.Id, attempt, retries.MaxAttempts, exception.Message);
         }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Everything else, classified - never allowed to escape. Before this, a
+            // missing credential, an access-denied share, a malformed Graph reply, or a
+            // busy database killed the worker outright: the row stayed "in progress"
+            // for ever, the host never went idle, and the next host start picked the
+            // same row first and died the same way, blocking every transfer behind it.
+            (FailureKind kind, string message) = Classify(exception);
+            int attempt = _queue.Fail(item.Id, kind, message, DateTimeOffset.UtcNow, null, retries);
+            _log.Warning(exception, "Transfer {Id} failed on attempt {Attempt} of {Max} ({Kind}): {Message}",
+                item.Id, attempt, retries.MaxAttempts, kind, message);
+        }
+
+        return true;
     }
+
+    /// <summary>
+    /// What an unexpected failure means for retrying. A credential problem waits for a
+    /// person to fix the credential; a refusal that no retry can change parks for a
+    /// person; anything else is retried within the attempt limit, which is the safe
+    /// default when the cause is unknown - the local file is untouched either way.
+    /// </summary>
+    internal static (FailureKind Kind, string Message) Classify(Exception exception) => exception switch
+    {
+        Secrets.CredentialNotFoundException => (FailureKind.AuthExpired, exception.Message),
+        UploadSessionExpiredException => (FailureKind.Transient,
+            "SharePoint refused a newly created upload session. The next attempt starts again."),
+        System.Security.Cryptography.CryptographicException => (FailureKind.AuthExpired,
+            "The stored secret for this destination could not be read: it was saved by a different Windows " +
+            "account or on another PC. Open the destination in Settings and enter the secret again."),
+        Microsoft.Identity.Client.MsalServiceException msal when msal.StatusCode is 400 or 401 => (FailureKind.AuthExpired,
+            "Microsoft sign-in refused the destination's credentials: " + msal.Message),
+        Microsoft.Identity.Client.MsalException msal => (FailureKind.Transient,
+            "Signing in to Microsoft failed: " + msal.Message),
+        UnauthorizedAccessException => (FailureKind.Permanent,
+            "Access was refused: " + exception.Message + " Check this Windows account can write to the destination, then press Retry."),
+        ArgumentException or NotSupportedException or PathTooLongException => (FailureKind.Permanent,
+            "The destination path is not usable: " + exception.Message + " Fix the destination in Settings, then press Retry."),
+        _ => (FailureKind.Transient, exception.Message),
+    };
 
     /// <summary>
     /// Writes copy progress back to the queue so the Transfers page can draw a bar,
@@ -381,18 +463,53 @@ public sealed class TransferWorker : IDisposable
         var uploader = new GraphUploader(_graphHttp, _tokenProviderFactory(destination));
 
         string folder = ResolveFolder(item, destination.SharePointFolder ?? "").Trim('/');
+        string driveItemPath = $"{folder}/{targetName}".TrimStart('/');
 
-        string uploadUrl = item.UploadUrl ?? await uploader.CreateSessionAsync(
-            destination.SharePointDriveId,
-            $"{folder}/{targetName}".TrimStart('/'),
-            cancellationToken).ConfigureAwait(false);
+        string? uploadUrl = item.UploadUrl;
+        long confirmedOffset = item.ConfirmedOffset;
+        bool sessionExpired = false;
+        while (true)
+        {
+            if (uploadUrl is null)
+            {
+                // After an expired session, the upload may in fact have finished: the
+                // final chunk landed and only its reply was lost. Starting again would
+                // put a second copy beside it ("name 1.mkv"), so look first.
+                if (sessionExpired && await uploader.AlreadyUploadedAsync(
+                        destination.SharePointDriveId, driveItemPath, new FileInfo(item.OutputPath).Length,
+                        cancellationToken).ConfigureAwait(false))
+                {
+                    _log.Information("{File} is already in SharePoint destination {Destination}; its last reply was lost",
+                        item.OutputPath, destination.Name);
+                    return;
+                }
 
-        await uploader.UploadAsync(
-            uploadUrl, item.OutputPath, item.ConfirmedOffset,
-            // Persist EVERY confirmed chunk (SPEC §7) — this is what an interrupted
-            // upload resumes from, and it doubles as the progress the page shows.
-            confirmedOffset => _queue.RecordProgress(item.Id, uploadUrl, confirmedOffset),
-            cancellationToken).ConfigureAwait(false);
+                uploadUrl = await uploader.CreateSessionAsync(
+                    destination.SharePointDriveId, driveItemPath, cancellationToken).ConfigureAwait(false);
+                confirmedOffset = 0;
+            }
+
+            string sessionUrl = uploadUrl;
+            try
+            {
+                await uploader.UploadAsync(
+                    sessionUrl, item.OutputPath, confirmedOffset,
+                    // Persist EVERY confirmed chunk (SPEC §7) — this is what an interrupted
+                    // upload resumes from, and it doubles as the progress the page shows.
+                    offset => _queue.RecordProgress(item.Id, sessionUrl, offset),
+                    cancellationToken).ConfigureAwait(false);
+                break;
+            }
+            catch (UploadSessionExpiredException) when (!sessionExpired)
+            {
+                // Once per attempt: a brand-new session that is ALSO refused is not an
+                // expiry, and falls through to the ordinary failure handling.
+                _log.Information("Upload session for transfer {Id} has expired; starting a new one", item.Id);
+                _queue.ForgetUploadSession(item.Id);
+                sessionExpired = true;
+                uploadUrl = null;
+            }
+        }
 
         _log.Information("Uploaded {File} to SharePoint destination {Destination}",
             item.OutputPath, destination.Name);

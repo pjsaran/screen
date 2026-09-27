@@ -137,8 +137,11 @@ public sealed class SessionPlanner
         // 5. Disk preflight against the MEASURED rate (SPEC §5/§6) — the rate the
         // encoder trial actually wrote at on this canvas, never a hardcoded table.
         var diskGuard = new DiskGuard(workingFolder, encoderSelection.BytesPerHour);
-        PreflightResult preflight = diskGuard.Preflight(
-            new DriveInfo(Path.GetPathRoot(settings.WorkingFolder)!).AvailableFreeSpace);
+        long freeBytes = Common.FreeSpace.AvailableBytes(settings.WorkingFolder)
+            ?? throw new SessionStartException(
+                $"Captr cannot tell how much space is free in the working folder, {settings.WorkingFolder}. " +
+                "If it is on a network share, check the share is reachable; otherwise choose a local folder in Settings.");
+        PreflightResult preflight = diskGuard.Preflight(freeBytes);
         if (!preflight.CanStart)
         {
             throw new SessionStartException(preflight.RefusalMessage!);

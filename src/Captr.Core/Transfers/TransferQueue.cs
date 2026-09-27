@@ -290,8 +290,22 @@ public sealed class TransferQueue
 
     /// <summary>Marks an item as being worked on right now, and resets its byte
     /// counter so the progress shown belongs to THIS attempt.</summary>
-    public void MarkInProgress(long id) =>
-        Execute("UPDATE transfers SET state = 'in-progress', bytes_sent = 0 WHERE id = $id", ("$id", id));
+    /// <returns>False when the item is no longer waiting — it was stopped, completed,
+    /// or removed between being picked and being claimed — and must not be sent.</returns>
+    /// <remarks>Conditional on purpose. Unconditionally it overwrote a Stop pressed in
+    /// that window, and the transfer ran anyway.</remarks>
+    public bool MarkInProgress(long id) =>
+        Execute(
+            "UPDATE transfers SET state = 'in-progress', bytes_sent = 0 WHERE id = $id AND state IN ('pending', 'in-progress')",
+            ("$id", id)) == 1;
+
+    /// <summary>
+    /// Forgets an upload session the server no longer recognises (Graph expires them
+    /// after a period of inactivity), so the next attempt starts a new one from the
+    /// first byte instead of retrying a dead link for ever.
+    /// </summary>
+    public void ForgetUploadSession(long id) =>
+        Execute("UPDATE transfers SET upload_url = NULL, confirmed_offset = 0, bytes_sent = 0 WHERE id = $id", ("$id", id));
 
     /// <summary>Persists chunk progress — called after EVERY confirmed chunk
     /// (SPEC §7), so a crash resumes from here, not from zero.</summary>
@@ -353,11 +367,14 @@ public sealed class TransferQueue
             _ => (StateManualRetry, (string?)null, serverMessage),
         };
 
+        // Never over a Stop or a success: a failure that lands just after the user
+        // pressed Stop used to re-queue the row, which then retried by itself —
+        // exactly what Stop exists to prevent.
         Execute(
             """
             UPDATE transfers
             SET state = $state, attempts = $attempts, next_attempt_utc = $next, last_error = $error
-            WHERE id = $id
+            WHERE id = $id AND state NOT IN ('cancelled', 'completed')
             """,
             ("$state", state), ("$attempts", attempt), ("$next", (object?)nextAttempt ?? DBNull.Value),
             ("$error", message), ("$id", id));
@@ -370,28 +387,30 @@ public sealed class TransferQueue
     /// the queue immediately, and resets its attempt count — a person choosing to
     /// retry is starting again, not continuing a run that already gave up.
     /// </summary>
-    public void Retry(long id) =>
+    /// <returns>False when there is no such transfer, or it already completed.</returns>
+    public bool Retry(long id) =>
         Execute(
             """
             UPDATE transfers
             SET state = 'pending', next_attempt_utc = NULL, attempts = 0
             WHERE id = $id AND state != 'completed'
             """,
-            ("$id", id));
+            ("$id", id)) == 1;
 
     /// <summary>
     /// Stops a transfer at the user's request. The row stops retrying by itself and
     /// waits — <see cref="Retry"/> is the only thing that brings it back. Used when a
     /// destination is known to be down and the retries are just noise.
     /// </summary>
-    public void Cancel(long id) =>
+    /// <returns>False when there is no such transfer, or it had already finished or stopped.</returns>
+    public bool Cancel(long id) =>
         Execute(
             """
             UPDATE transfers
             SET state = 'cancelled', next_attempt_utc = NULL, last_error = 'Stopped at your request.'
             WHERE id = $id AND state NOT IN ('completed', 'cancelled')
             """,
-            ("$id", id));
+            ("$id", id)) == 1;
 
     /// <summary>Re-arms paused-auth items after a successful re-authentication.</summary>
     public void ResumeAuthPaused() =>
@@ -647,7 +666,7 @@ public sealed class TransferQueue
         LastError: reader.IsDBNull(12) ? null : reader.GetString(12),
         CreatedUtc: DateTimeOffset.Parse(reader.GetString(13), CultureInfo.InvariantCulture));
 
-    private void Execute(string sql, params (string Name, object Value)[] parameters)
+    private int Execute(string sql, params (string Name, object Value)[] parameters)
     {
         using SqliteConnection connection = Open();
         using SqliteCommand command = connection.CreateCommand();
@@ -657,7 +676,7 @@ public sealed class TransferQueue
             command.Parameters.AddWithValue(name, value);
         }
 
-        command.ExecuteNonQuery();
+        return command.ExecuteNonQuery();
     }
 
     private SqliteConnection Open()

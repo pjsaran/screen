@@ -76,3 +76,9 @@ CredDelete
 CredEnumerate
 CredFree
 CREDENTIALW
+
+// --- Free space for ANY folder: UNC shares and folder mount points included.
+// System.IO.DriveInfo accepts only drive letters, so every UNC destination and UNC
+// working folder failed in it; see Common/FreeSpace.
+GetDiskFreeSpaceEx
+

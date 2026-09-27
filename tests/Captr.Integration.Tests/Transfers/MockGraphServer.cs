@@ -13,7 +13,7 @@ namespace Captr.Integration.Tests.Transfers;
 /// </summary>
 public sealed class MockGraphServer : IDisposable
 {
-    private readonly HttpListener _listener = new();
+    private readonly HttpListener _listener;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly MemoryStream _received = new();
     private readonly Lock _gate = new();
@@ -61,12 +61,56 @@ public sealed class MockGraphServer : IDisposable
     /// the permission-failure script.</summary>
     public (HttpStatusCode Status, string Body)? ForcedFailure { get; set; }
 
+    /// <summary>Upload sessions created so far.</summary>
+    public int SessionsCreated { get; private set; }
+
+    /// <summary>When set, the FINAL chunk is stored and the item completed, but the
+    /// connection drops before the 201 is sent — the "success whose reply was lost"
+    /// script.</summary>
+    public bool LoseFinalReply { get; set; }
+
+    /// <summary>
+    /// Expires the current upload session, as Graph does to an idle one: its URL now
+    /// answers 404, and whatever it had received is discarded — a new session starts
+    /// from the first byte.
+    /// </summary>
+    public void ExpireCurrentSession()
+    {
+        lock (_gate)
+        {
+            _expiredSessions.Add(_currentSession);
+            _received.SetLength(0);
+        }
+    }
+
+    private readonly HashSet<int> _expiredSessions = [];
+    private readonly Dictionary<string, long> _completedItems = new(StringComparer.OrdinalIgnoreCase);
+    private int _currentSession;
+    private string _currentItemPath = "";
+
     public MockGraphServer()
     {
-        int port = Random.Shared.Next(20000, 60000);
-        BaseUrl = new Uri($"http://127.0.0.1:{port}/graph/");
-        _listener.Prefixes.Add(BaseUrl.ToString());
-        _listener.Start();
+        // A random port can already be taken (by another test's listener still
+        // closing, or anything else on the machine); try a few before giving up
+        // rather than failing a test on a coin toss.
+        // A listener whose Start fails disposes itself, so each try gets a new one.
+        for (int attempt = 1; ; attempt++)
+        {
+            int port = Random.Shared.Next(20000, 60000);
+            BaseUrl = new Uri($"http://127.0.0.1:{port}/graph/");
+            var listener = new HttpListener();
+            listener.Prefixes.Add(BaseUrl.ToString());
+            try
+            {
+                listener.Start();
+                _listener = listener;
+                break;
+            }
+            catch (HttpListenerException) when (attempt < 10)
+            {
+            }
+        }
+
         _serveLoop = Task.Run(ServeLoopAsync);
     }
 
@@ -114,14 +158,60 @@ public sealed class MockGraphServer : IDisposable
             // Kept so tests can prove the client addressed the RIGHT drive — the
             // real Graph rejects anything but an actual drive id here.
             LastSessionPath = request.Url.AbsolutePath;
+            int session;
+            lock (_gate)
+            {
+                session = ++_currentSession;
+                SessionsCreated++;
+                _received.SetLength(0);
+                _currentItemPath = ItemPathOf(request.Url.AbsolutePath.Replace(":/createUploadSession", "", StringComparison.Ordinal));
+            }
+
             await WriteJsonAsync(response, 200,
-                $$"""{"uploadUrl":"{{BaseUrl}}upload-session/1","expirationDateTime":"2030-01-01T00:00:00Z"}""")
+                $$"""{"uploadUrl":"{{BaseUrl}}upload-session/{{session.ToString(CultureInfo.InvariantCulture)}}","expirationDateTime":"2030-01-01T00:00:00Z"}""")
                 .ConfigureAwait(false);
+            return;
+        }
+
+        if (request.HttpMethod == "GET" && request.Url!.AbsolutePath.Contains("/root:/", StringComparison.Ordinal))
+        {
+            // Item lookup: what a client asks after losing a completion reply.
+            long? size;
+            lock (_gate)
+            {
+                size = _completedItems.TryGetValue(ItemPathOf(request.Url.AbsolutePath), out long found) ? found : null;
+            }
+
+            if (size is { } bytes)
+            {
+                await WriteJsonAsync(response, 200,
+                    $$"""{"id":"item1","size":{{bytes.ToString(CultureInfo.InvariantCulture)}}}""").ConfigureAwait(false);
+            }
+            else
+            {
+                response.StatusCode = 404;
+                response.Close();
+            }
+
             return;
         }
 
         if (request.Url!.AbsolutePath.Contains("upload-session", StringComparison.Ordinal))
         {
+            int session = int.Parse(request.Url.Segments[^1], CultureInfo.InvariantCulture);
+            bool gone;
+            lock (_gate)
+            {
+                gone = _expiredSessions.Contains(session);
+            }
+
+            if (gone)
+            {
+                response.StatusCode = 404;
+                response.Close();
+                return;
+            }
+
             if (request.HttpMethod == "GET")
             {
                 // Session status: where the server actually got to.
@@ -172,6 +262,20 @@ public sealed class MockGraphServer : IDisposable
 
         if (ConfirmedBytes >= total)
         {
+            lock (_gate)
+            {
+                // A completed session is gone, exactly as in Graph: its URL now 404s.
+                _completedItems[_currentItemPath] = ConfirmedBytes;
+                _expiredSessions.Add(_currentSession);
+            }
+
+            if (LoseFinalReply)
+            {
+                LoseFinalReply = false;
+                response.Abort();
+                return;
+            }
+
             await WriteJsonAsync(response, 201,
                 $$"""{"id":"item1","size":{{ConfirmedBytes.ToString(CultureInfo.InvariantCulture)}}}""")
                 .ConfigureAwait(false);
@@ -183,6 +287,10 @@ public sealed class MockGraphServer : IDisposable
                 .ConfigureAwait(false);
         }
     }
+
+    /// <summary>"/graph/drives/{id}/root:/folder/name.mkv" → "folder/name.mkv", unescaped.</summary>
+    private static string ItemPathOf(string absolutePath) =>
+        Uri.UnescapeDataString(absolutePath[(absolutePath.IndexOf("/root:/", StringComparison.Ordinal) + "/root:/".Length)..]);
 
     private static async Task WriteJsonAsync(HttpListenerResponse response, int status, string json)
     {

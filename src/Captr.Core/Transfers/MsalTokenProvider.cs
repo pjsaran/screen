@@ -49,7 +49,13 @@ public sealed class MsalTokenProvider : IAccessTokenProvider
 
         try
         {
+            // A secret typed into "Test connection" must be PROVEN, not trusted: MSAL
+            // otherwise answers from any unexpired token it holds for this client,
+            // without ever presenting the secret, and a mistyped replacement reported
+            // "Connected" for up to an hour after the last upload — then failed every
+            // transfer once the cached token ran out.
             AuthenticationResult result = await _app.AcquireTokenForClient(GraphScopes)
+                .WithForceRefresh(_secretOverride is not null)
                 .ExecuteAsync(cancellationToken).ConfigureAwait(false);
             return result.AccessToken;
         }
@@ -78,6 +84,13 @@ public sealed class MsalTokenProvider : IAccessTokenProvider
                 .WithTenantId(_destination.TenantId)
                 .WithClientSecret(System.Text.Encoding.UTF8.GetString(secretBytes))
                 .Build();
+
+        // A typed secret under test gets no cache at all: its token must not reach the
+        // shared cache the host's uploads use before the secret has even been saved.
+        if (_secretOverride is not null)
+        {
+            return app;
+        }
 
         // DPAPI-protected on-disk token cache (SPEC §7).
         var cacheProperties = new StorageCreationPropertiesBuilder(

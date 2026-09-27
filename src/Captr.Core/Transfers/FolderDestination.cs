@@ -1,3 +1,4 @@
+using Captr.Core.Common;
 using Captr.Core.Naming;
 using Captr.Core.Sessions;
 
@@ -20,45 +21,73 @@ public static class FolderDestination
         Directory.CreateDirectory(targetFolder);
 
         long sourceBytes = new FileInfo(sourcePath).Length;
-        var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(targetFolder))!);
-        if (drive.AvailableFreeSpace < sourceBytes + (64L << 20))
+
+        // Null means the free space could not be measured (some NAS shares will not
+        // say). The copy itself then finds out, and fails as an ordinary IOException.
+        if (FreeSpace.AvailableBytes(targetFolder) is { } available && available < sourceBytes + (64L << 20))
         {
             throw new IOException(
-                $"Not enough free space on {drive.Name} for {sourceBytes / 1_000_000.0:F0} MB " +
+                $"Not enough free space at {targetFolder} for {sourceBytes / 1_000_000.0:F0} MB " +
                 "plus margin. The local recording is untouched.");
         }
 
-        // Land under the collision-resolved FINAL name + .partial, so a crashed
-        // copy is recognisable and the final rename is a same-volume atomic move.
+        // Land under the collision-resolved FINAL name plus a unique .partial suffix,
+        // so a crashed copy is recognisable and the final rename is a same-volume
+        // atomic move. Unique and CreateNew, because a destination folder may be
+        // shared: another machine's copy in flight, or anything else already sitting
+        // at "<name>.partial", is never truncated or written through.
         string finalPath = OutputNamer.ResolveCollision(targetFolder, desiredFileName);
-        string partialPath = finalPath + ".partial";
+        string partialPath = $"{finalPath}.{Guid.NewGuid().ToString("N")[..8]}.partial";
 
-        string sourceHash;
-        await using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-        await using (var target = new FileStream(partialPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        try
         {
-            sourceHash = await CopyWithHashAsync(source, target, sourceBytes, progress, cancellationToken).ConfigureAwait(false);
-            await target.FlushAsync(cancellationToken).ConfigureAwait(false);
-        }
+            string sourceHash;
+            await using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            await using (var target = new FileStream(partialPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                sourceHash = await CopyWithHashAsync(source, target, sourceBytes, progress, cancellationToken).ConfigureAwait(false);
 
-        // Verify by re-reading the DESTINATION (SPEC §7): size and hash must match
-        // what left the source — this is what catches a lying network filesystem.
-        var landed = new FileInfo(partialPath);
-        if (landed.Length != sourceBytes)
+                // All the way to the device, not just out of .NET's buffer: the
+                // verification below must read what the destination actually holds.
+                target.Flush(flushToDisk: true);
+            }
+
+            // Verify by re-reading the DESTINATION (SPEC §7): size and hash must match
+            // what left the source — this is what catches a lying network filesystem.
+            var landed = new FileInfo(partialPath);
+            if (landed.Length != sourceBytes)
+            {
+                throw new IOException($"Verification failed: copied size {landed.Length} != source size {sourceBytes}.");
+            }
+
+            string landedHash = await FinalizationPipeline.HashFileAsync(partialPath, cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(landedHash, sourceHash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Verification failed: the copied file's hash differs from the source.");
+            }
+
+            File.Move(partialPath, finalPath);
+            return finalPath;
+        }
+        catch
         {
-            File.Delete(partialPath);
-            throw new IOException($"Verification failed: copied size {landed.Length} != source size {sourceBytes}.");
+            // A failed, cancelled, or timed-out copy leaves nothing behind for someone
+            // to mistake for a recording. Best effort: the share may be the problem.
+            TryDelete(partialPath);
+            throw;
         }
+    }
 
-        string landedHash = await FinalizationPipeline.HashFileAsync(partialPath, cancellationToken).ConfigureAwait(false);
-        if (!string.Equals(landedHash, sourceHash, StringComparison.OrdinalIgnoreCase))
+    private static void TryDelete(string path)
+    {
+        try
         {
-            File.Delete(partialPath);
-            throw new IOException("Verification failed: the copied file's hash differs from the source.");
+            File.Delete(path);
         }
-
-        File.Move(partialPath, finalPath);
-        return finalPath;
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Left for a person to tidy; the next attempt uses a new name regardless.
+        }
     }
 
     /// <summary>Copies while hashing the source stream in one pass.</summary>
