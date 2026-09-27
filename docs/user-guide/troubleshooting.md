@@ -7,8 +7,8 @@ English, what is true right now:
 
 | Check | Catches |
 |---|---|
-| Settings | A settings file that will not load, or will not validate. |
-| FFmpeg | A missing or damaged encoder — Captr cannot record without it. |
+| Settings | A settings file that will not load, or will not validate — and what Captr did about it (restored the previous version, or kept a file from a newer Captr aside). |
+| FFmpeg | A missing encoder, or one that is not exactly the build Captr ships — Captr cannot record without it. |
 | Displays | No displays, or every display excluded. |
 | Encoder | Which encoder this machine proved, and whether it fell back to the CPU. |
 | Disk space | How many **hours of recording** are left, not just free bytes. |
@@ -39,11 +39,14 @@ terminal was already open when Captr was installed. Open a new terminal. If it i
 still missing, reinstall with the option ticked, or use the full path
 `"C:\Program Files\Captr\captr.exe"`.
 
-### The recording is black
+### A scheduled recording never started, or older recordings are black
 
-Almost always a scheduled task set to "Run whether user is logged on or not". See
-the warning in [Scheduled recording](scheduling.md) — it is a Windows limitation,
-not something Captr can work around.
+A task set to "Run whether user is logged on or not" runs in session 0, where there
+is no desktop to capture. Captr now refuses to record there — the task's Last Run
+Result shows `(0x1)` and `captr start` says "Captr cannot record here: it is
+running in session 0 …". Set the task to "Run only when user is logged on". See
+[Scheduled recording](scheduling.md). Black recordings made that way by an older
+Captr are that same mistake; nothing can recover the picture.
 
 ### Recording will not start
 
@@ -53,6 +56,40 @@ Diagnostics names the reason. The usual ones:
 - **Less than 30 minutes of disk.** Captr refuses to start a recording it can
   predict will run out. Free space, or pick a working folder on a bigger drive.
 - **Settings are invalid.** The Settings page shows which field and why.
+- **FFmpeg is missing or has been changed.** Captr runs only the FFmpeg it was
+  installed with, from its own `ffmpeg` folder, and checks it before every use.
+  "ffmpeg.exe was not found" usually means antivirus software quarantined it; "is
+  not the FFmpeg build Captr ships" means the file was altered or damaged. Either
+  way, reinstall Captr (and, for antivirus, ask for Captr's folder to be allowed).
+- **Captr is running in session 0.** See above.
+
+A refused start never leaves an empty recording behind.
+
+### Messages about "the recorder"
+
+The window and `captr` are views of a separate background recorder. When they
+cannot talk to it, they say what that means and what to do:
+
+| Message begins | What it means | What to do |
+|---|---|---|
+| "Nothing is recording right now." | No recorder is running, so there is nothing to pause or stop. | Nothing. |
+| "A Captr recorder from a different version is still running…" | Usually a recorder from before an update, still finishing its work. | Quit Captr from the tray icon, wait a minute, and open it again. |
+| "Captr lost contact with its recorder part-way through…" | The connection dropped mid-request. A recording in progress is not affected. | Try again. If it keeps happening, open Diagnostics and export a support bundle. |
+| "Captr's recorder (Captr.App.exe) is missing…" | The installation is damaged. | Reinstall Captr. |
+| "Captr's recorder was started but did not answer within 60 seconds…" / "…did not answer '…' within … minutes" | The recorder is stuck or very busy. It may still be working. | Check `captr status`; if it stays stuck, open Diagnostics (or run `captr doctor`) and export a support bundle. The message names the log folder. |
+| "Captr's command pipe exists but does not belong to you…" | Another account or program has taken the name Captr uses to reach its recorder, and Captr refused to use it. | Sign out and back in; if it persists, ask your administrator to find the process that owns it. |
+
+`captr` keeps its [exit codes](command-line.md#exit-codes) for these: `3` when the
+recorder cannot be reached or does not answer in time, `1` for the rest.
+
+### Windows says it blocked part of Captr (Smart App Control)
+
+Smart App Control, and application control policies like it, block program files
+that carry no valid signature. Every file in a signed Captr release is signed —
+Captr's own, the bundled FFmpeg, and the third-party libraries — so a release is not
+blocked. A **development build** (built from source without a certificate) is
+unsigned, and on a PC with Smart App Control on, Windows may refuse to load it.
+Install a signed release instead.
 
 ### The first recording takes a few seconds to start
 
@@ -86,13 +123,18 @@ what to send with a support bundle.
 
 ### The recording stopped on its own, and nobody stopped it
 
-Captr never stops quietly. Whatever ended it was written down, in this order of
-likelihood:
+Captr never stops quietly. Home shows "Recording stopped" with the reason until you
+press Dismiss, the tray icon shows the error icon, and `captr status` says "The last
+recording stopped on its own: …" (see
+[Recording](recording.md#when-a-recording-stops-on-its-own)). Whatever ended it was
+also written down, in this order of likelihood:
 
 1. **The disk ran low.** Captr stops cleanly with about five minutes of space left,
    because a clean stop beats a disk-full crash. The footage up to that point is
    finalised and complete. Look in the session's `journal.ndjson` for a note saying
-   "Disk critically low".
+   "Disk critically low". If there was not even room to assemble the finished file,
+   Captr says so, keeps every segment as it is, and finishes the file once space is
+   freed — the next time it starts, or at once with `captr recover`.
 2. **Windows shut down, restarted, or logged you off.** Captr holds the shutdown
    until the recording is closed properly, then lets it continue. On an **AWS
    WorkSpace set to AutoStop**, disconnecting your client eventually stops the whole
@@ -184,9 +226,17 @@ reads it back.
 ### My settings went back to defaults
 
 Every save keeps the version it replaced as `settings.json.bak` beside it, and Captr
-reaches for that automatically if the settings file goes missing or will not parse.
-Diagnostics says so when it happens, and an unreadable file is kept as
-`settings.json.corrupt` so it can be looked at.
+reaches for that automatically if the settings file goes missing or cannot be used —
+not valid JSON, or JSON of the wrong shape (a word where a number belongs, a
+destination kind Captr does not know). Diagnostics says so when it happens, and an
+unusable file is kept as `settings.json.corrupt` so it can be looked at. A setting
+written as `null` simply takes its default.
+
+A settings file written by a **newer** Captr — after going back to an older version
+— is not thrown away either. It is kept, untouched, as
+`settings.json.from-schema-<N>` (a name no save ever writes), Captr uses defaults,
+and Diagnostics says where the file is. Install the newer Captr again and copy that
+file back over `settings.json` to get everything back.
 
 If both are gone, the settings are gone — they are small and quick to re-enter, and
 `captr settings export` makes a copy you can keep wherever you like.
@@ -208,6 +258,26 @@ Nothing to do. The next time Captr runs, it finds the unfinalised recording,
 repairs any truncated segment, assembles what reached disk, and reports what was
 recovered. You can force it now with `captr recover`.
 
+If only Captr's background recorder died, FFmpeg keeps recording until the next
+recorder starts; that one asks FFmpeg to finish cleanly, as Stop would, and kills it
+only if it does not. The report counts only footage that actually survived: time the
+journal says was recorded but that no segment holds is shown as a "footage lost"
+gap, never as recorded.
+
+### "Captr's window hit an unexpected problem"
+
+The window met an error nothing else handled. It tells you (at most once a minute),
+saves the details, and carries on; any recording continues, because it runs
+separately. If something on screen looks wrong afterwards, quit Captr from the tray
+and open it again.
+
+Every Captr program — the window, the recorder, and `captr` — writes such a **crash
+report** to the logs folder instead of just disappearing:
+`crash-<ui|host|cli>-<UTC time>.txt`, with the version, the machine, and the error,
+secrets masked. Only the ten newest are kept, and nothing is sent anywhere. The
+support bundle includes them. `captr` also keeps its last unexpected error in
+`cli-last-error.txt` in the same folder.
+
 ## Proving a recording has not been altered
 
 ```bat
@@ -223,12 +293,28 @@ enough that "is this the file that was made?" is a question someone will ask.
 
 ## Sending a support bundle
 
-**Diagnostics → Export support bundle** writes a zip to your Desktop containing the
-recordings' journals and integrity records, the application logs, the tail of the
-encoder's own output, and system information.
+**Diagnostics → Export support bundle** writes `captr-support-<date>-<time>.zip` to
+your Desktop. It contains:
+
+- the logs — the window's and the recorder's, **including the one being written
+  right now**, crash reports, and `cli-last-error.txt` if there is one;
+- for every recording in the working folder: its journal, integrity record,
+  heartbeat, FFmpeg's own report and progress files;
+- basic system information (Windows version, processor count, Captr and .NET
+  versions);
+- a `README.txt` listing every file in the bundle, and any that could not be read.
 
 **It contains no video and no secrets.** That is enforced in code and proven by a
-test that plants a secret and then searches the bundle for it.
+test that plants a secret and then searches the bundle for it. Lines naming a
+password, secret, token, or key are masked after the name, and sign-in tokens are
+masked wherever they appear.
+
+**It leaves out who and where.** Your Windows user name, PC name, and profile
+folder, and — from your settings — each SharePoint destination's tenant id, client
+id, and site host, and the server name of any network folder, are replaced with
+placeholders such as `<user>`, `<pc>`, `%USERPROFILE%`, `<tenant-id>`,
+`<client-id>`, `<sharepoint-host>`, and `<server>`. The window says what the bundle
+holds when it is made; open it and check before you send it.
 
 Include `captr version` (or the "This installation" block from Diagnostics) with
 it — the version, source commit, and exact FFmpeg build are what make a problem
@@ -245,7 +331,11 @@ Every path is listed on the Diagnostics page with an Open button. For reference:
 | Logs | `%LOCALAPPDATA%\Captr\logs` |
 | Transfer queue | `%LOCALAPPDATA%\Captr\transfers.db` |
 | Encoder cache | `%LOCALAPPDATA%\Captr\encoder-cache.json` |
+| Crash reports | `%LOCALAPPDATA%\Captr\logs\crash-*.txt` |
 | Stored secrets | Windows Credential Manager, under `Captr/` |
 
 Everything is under one folder on purpose: a backup, a support bundle, or a
-clean-up is one place rather than several.
+clean-up is one place rather than several. (If the `CAPTR_DATA_ROOT` environment
+variable is set — Captr's own tests use it — everything in this table except the
+stored secrets is under that folder instead, and that copy of Captr has a recorder
+of its own. It is not set in a normal installation.)
