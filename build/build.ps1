@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     One-command build for Captr: format check, licence gate, build, test, publish,
     and (optionally) installer — idempotent and loud on failure (SPEC §11).
@@ -27,7 +27,8 @@ param(
     [switch]$Full,
     [switch]$Installer,
     [switch]$Publish,
-    [string]$TestFilter = 'Category=Ffmpeg',
+    # Overrides the integration-test selection entirely. Empty = the default below.
+    [string]$TestFilter = '',
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent)
 )
 
@@ -85,14 +86,23 @@ try {
         dotnet test (Join-Path $RepoRoot 'tests\Captr.Core.Tests') --configuration $Configuration --no-build
         if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed.' }
 
-        # Chaos is CI-safe (all lavfi-based) so it always runs. Display/Gpu need a
-        # real desktop and GPU; Soak needs both AND patience — only with -Full.
-        # The soak's length comes from CAPTR_SOAK_MINUTES (default 6).
-        $filter = if ($Full) {
-            "$TestFilter|Category=Chaos|Category=Display|Category=Gpu|Category=Soak"
+        # Select by EXCLUDING what this machine cannot run, never by listing what it
+        # can. The old include-list (Ffmpeg|Chaos) silently skipped every test that
+        # carried no category - fourteen of them, the SharePoint resume test among
+        # them - while testing.md cited them as coverage. TestCategoryTests now
+        # insists every class names a category; this makes a forgotten one run anyway.
+        #   Published - needs publish/, so it runs after step 6 below.
+        #   Installer - installs and uninstalls the product; run on purpose only.
+        #   Display/Gpu/Soak - need a real desktop, a GPU, and patience: -Full only.
+        #     The soak's length comes from CAPTR_SOAK_MINUTES (default 6).
+        $filter = if ($TestFilter) {
+            $TestFilter
+        } elseif ($Full) {
+            'Category!=Published&Category!=Installer'
         } else {
-            "$TestFilter|Category=Chaos"
+            'Category!=Published&Category!=Installer&Category!=Display&Category!=Gpu&Category!=Soak'
         }
+        Write-Host "Integration filter: $filter"
         dotnet test (Join-Path $RepoRoot 'tests\Captr.Integration.Tests') --configuration $Configuration --no-build --filter $filter
         if ($LASTEXITCODE -ne 0) { throw 'Integration tests failed.' }
     }

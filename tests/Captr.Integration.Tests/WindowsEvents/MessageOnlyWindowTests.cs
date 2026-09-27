@@ -11,6 +11,7 @@ namespace Captr.Integration.Tests.WindowsEvents;
 /// The host's event window against the real Win32 message pump. Runs anywhere with
 /// a window station (trait Ffmpeg-free, CI-safe on windows-latest).
 /// </summary>
+[Trait("Category", "Os")]
 public class MessageOnlyWindowTests
 {
     [Fact]

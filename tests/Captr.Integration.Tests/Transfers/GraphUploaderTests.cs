@@ -10,6 +10,7 @@ namespace Captr.Integration.Tests.Transfers;
 /// an interrupted upload, and a permission failure lands in manual retry with the
 /// server's message intact").
 /// </summary>
+[Trait("Category", "Os")]
 public class GraphUploaderTests : IDisposable
 {
     private sealed class FakeTokens : IAccessTokenProvider

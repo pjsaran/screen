@@ -9,6 +9,7 @@ namespace Captr.Integration.Tests.Secrets;
 /// credential survives a host restart and appears in no file"). Test entries use a
 /// unique name and are deleted afterwards.
 /// </summary>
+[Trait("Category", "Os")]
 public class CredentialVaultTests : IDisposable
 {
     private readonly string _name = "test-" + Guid.NewGuid().ToString("N")[..12];

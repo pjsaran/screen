@@ -42,15 +42,12 @@ jobs:
       - name: Unit tests
         run: dotnet test tests/Captr.Core.Tests --configuration Release --no-build
 
-      - name: Integration tests (CI-safe categories only)
+      # Excludes what a hosted runner cannot do rather than listing what it can: an
+      # include-list once skipped every uncategorised test without anyone noticing.
+      - name: Integration tests (everything a hosted runner can run)
         run: >
           dotnet test tests/Captr.Integration.Tests --configuration Release --no-build
-          --filter "Category=Ffmpeg"
-
-      - name: Chaos tests (kills, corruption, vanished folder — all lavfi-based)
-        run: >
-          dotnet test tests/Captr.Integration.Tests --configuration Release --no-build
-          --filter "Category=Chaos"
+          --filter "Category!=Published&Category!=Installer&Category!=Display&Category!=Gpu&Category!=Soak"
 
       - name: Package (publish + installer, unsigned unless secrets present)
         run: pwsh build/build.ps1 -Configuration Release -SkipTests -Installer
