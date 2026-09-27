@@ -145,6 +145,55 @@ public sealed class TransferWorkerEndToEndTests : IDisposable
     }
 
     [Fact]
+    public async Task A_wrong_secret_pauses_the_transfer_for_new_credentials_and_sends_nothing()
+    {
+        // What Microsoft sign-in answers for a mistyped or expired client secret.
+        UseDestination(SharePoint());
+        _queue.Enqueue(Recording(1000), "sp", null, null);
+        TransferWorker worker = MakeWorker(_ => throw new Microsoft.Identity.Client.MsalServiceException(
+            "invalid_client", "AADSTS7000215: Invalid client secret provided.", 401));
+
+        TransferItem item = await RunOnceAsync(worker);
+
+        item.State.ShouldBe(TransferQueue.StatePausedAuth, "no retry can fix a wrong secret; a person must");
+        item.LastError.ShouldNotBeNull();
+        item.LastError.ShouldContain("refused the destination's credentials");
+        _server.SessionsCreated.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_token_SharePoint_rejects_pauses_the_transfer_for_new_credentials()
+    {
+        UseDestination(SharePoint());
+        _queue.Enqueue(Recording(1000), "sp", null, null);
+        _server.ForcedFailure = (System.Net.HttpStatusCode.Unauthorized,
+            """{"error":{"code":"InvalidAuthenticationToken","message":"Access token has expired or is not yet valid."}}""");
+
+        TransferItem item = await RunOnceAsync(MakeWorker());
+
+        item.State.ShouldBe(TransferQueue.StatePausedAuth);
+    }
+
+    [Fact]
+    public async Task A_site_the_app_was_never_granted_parks_the_transfer_with_SharePoint_s_reason()
+    {
+        // Sites.Selected without a grant on this site: every retry would be refused
+        // identically, so it waits for a person, with the server's words kept.
+        UseDestination(SharePoint());
+        string recording = Recording(1000);
+        _queue.Enqueue(recording, "sp", null, null);
+        _server.ForcedFailure = (System.Net.HttpStatusCode.Forbidden,
+            """{"error":{"code":"accessDenied","message":"Access denied"}}""");
+
+        TransferItem item = await RunOnceAsync(MakeWorker());
+
+        item.State.ShouldBe(TransferQueue.StateManualRetry);
+        item.LastError.ShouldNotBeNull();
+        item.LastError.ShouldContain("accessDenied");
+        File.Exists(recording).ShouldBeTrue("a refused transfer never touches the local recording");
+    }
+
+    [Fact]
     public async Task A_transfer_stopped_between_being_picked_and_being_claimed_is_not_sent()
     {
         string destinationFolder = Path.Combine(_dir, "dest");
