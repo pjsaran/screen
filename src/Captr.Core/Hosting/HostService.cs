@@ -16,6 +16,8 @@ namespace Captr.Core.Hosting;
 /// succeed, reporting the actual state — schedulers fire twice more often than
 /// anyone expects.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable",
+    Justification = "One HostService lives exactly as long as the host process; its only disposable, a SemaphoreSlim whose wait handle is never requested, holds no operating-system resource.")]
 public sealed class HostService : IHostOperations
 {
     private readonly SettingsStore _settingsStore;
@@ -43,6 +45,8 @@ public sealed class HostService : IHostOperations
 
     // Completed unless the host is running its startup recovery scan.
     private TaskCompletionSource _startupRecovery = CompletedGate();
+
+    private readonly SemaphoreSlim _recoveryScan = new(1, 1);
 
     public HostService(
         SettingsStore settingsStore,
@@ -394,6 +398,12 @@ public sealed class HostService : IHostOperations
     public async Task<RecoverResponse> RecoverAsync(CancellationToken cancellationToken)
     {
         Touch();
+
+        // Behind the startup scan, never beside it: the pipe now opens before that
+        // scan finishes, and `captr recover` run at that moment (the obvious thing to
+        // do after a crash) started a second scan of the same folders - two adoptions
+        // of the same orphaned encoder, two finalisations writing the same files.
+        await _startupRecovery.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<RecoveryReport> reports = await RunRecoveryScanAsync(cancellationToken).ConfigureAwait(false);
         return new RecoverResponse(
         [
@@ -434,10 +444,21 @@ public sealed class HostService : IHostOperations
     /// start … run this automatically without prompting, then report").</summary>
     public async Task<IReadOnlyList<RecoveryReport>> RunRecoveryScanAsync(CancellationToken cancellationToken)
     {
-        var pipeline = new FinalizationPipeline(FfmpegLocator.FindFfmpeg(), FfmpegLocator.FindFfprobe(), _log);
-        var scanner = new RecoveryScanner(pipeline, _log);
-        IReadOnlyList<RecoveryReport> reports = await scanner.ScanAndRecoverAsync(
-            _settingsStore.Load().WorkingFolder, cancellationToken, OwnedSessionFolders()).ConfigureAwait(false);
+        // One scan at a time, whoever asks: two scans finalising the same folder at
+        // once write over each other's output.
+        await _recoveryScan.WaitAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<RecoveryReport> reports;
+        try
+        {
+            var pipeline = new FinalizationPipeline(FfmpegLocator.FindFfmpeg(), FfmpegLocator.FindFfprobe(), _log);
+            var scanner = new RecoveryScanner(pipeline, _log);
+            reports = await scanner.ScanAndRecoverAsync(
+                _settingsStore.Load().WorkingFolder, cancellationToken, OwnedSessionFolders()).ConfigureAwait(false);
+        }
+        finally
+        {
+            _recoveryScan.Release();
+        }
 
         foreach (RecoveryReport report in reports)
         {
