@@ -207,9 +207,11 @@
                                                                 HorizontalAlignment="Right" VerticalAlignment="Center">
                                                         <ui:Button Style="{StaticResource IconRowButton}"
                                                                    Icon="{ui:SymbolIcon Edit20}" ToolTip="Edit"
+                                                                   AutomationProperties.Name="{Binding Name, StringFormat='Edit destination {0}'}"
                                                                    Tag="{Binding}" Click="OnEditDestinationClicked" />
                                                         <ui:Button Style="{StaticResource IconRowButton}" Margin="4,0,0,0"
                                                                    Icon="{ui:SymbolIcon Delete20}" ToolTip="Remove"
+                                                                   AutomationProperties.Name="{Binding Name, StringFormat='Remove destination {0}'}"
                                                                    Tag="{Binding}" Click="OnRemoveDestinationClicked" />
                                                     </StackPanel>
                                                 </Grid>

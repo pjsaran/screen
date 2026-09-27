@@ -111,6 +111,7 @@
                                                     <ui:Button Style="{StaticResource RowActionButton}" Content="Open"
                                                                Margin="6,0,0,0"
                                                                ToolTip="Show this recording in File Explorer"
+                                                               AutomationProperties.Name="{Binding Name, StringFormat='Show {0} in File Explorer'}"
                                                                Command="{Binding DataContext.OpenFolderCommand,
                                                                          RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                                CommandParameter="{Binding}" />
@@ -124,6 +125,7 @@
                                                     <ui:Button Style="{StaticResource OverflowButton}"
                                                                Content="&#x2026;" Margin="6,0,0,0"
                                                                ToolTip="More actions"
+                                                               AutomationProperties.Name="{Binding Name, StringFormat='More actions for {0}'}"
                                                                Click="OnMoreClicked" Tag="{Binding}">
                                                         <ui:Button.ContextMenu>
                                                             <ContextMenu>

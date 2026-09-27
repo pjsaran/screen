@@ -185,12 +185,14 @@
                                         <StackPanel Grid.Column="5" Orientation="Horizontal"
                                                     HorizontalAlignment="Right" VerticalAlignment="Center">
                                             <ui:Button Style="{StaticResource RowActionButton}" Content="Retry"
+                                                       AutomationProperties.Name="{Binding File, StringFormat='Retry sending {0}'}"
                                                        Command="{Binding DataContext.RetryCommand,
                                                                  RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                                        CommandParameter="{Binding}"
                                                        Visibility="{Binding CanRetry,
                                                                     Converter={StaticResource BoolToVisibility}}" />
                                             <ui:Button Style="{StaticResource RowActionButton}" Content="Stop"
+                                                       AutomationProperties.Name="{Binding File, StringFormat='Stop sending {0}'}"
                                                        ToolTip="Stop trying. The transfer stays in this list and can be retried; nothing local is deleted."
                                                        Command="{Binding DataContext.StopCommand,
                                                                  RelativeSource={RelativeSource AncestorType=ItemsControl}}"

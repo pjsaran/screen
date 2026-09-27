@@ -44,6 +44,14 @@ public partial class App : Application
         Core.Diagnostics.CrashReporter.Install("ui");
         DispatcherUnhandledException += OnUnexpectedError;
 
+        // A Windows high-contrast theme is an accessibility setting, not a taste: the
+        // app's own tinted cards and light/dark palette ignored it. Everything else
+        // about the theme is left exactly as it was.
+        if (SystemParameters.HighContrast)
+        {
+            Wpf.Ui.Appearance.ApplicationThemeManager.Apply(Wpf.Ui.Appearance.ApplicationTheme.HighContrast);
+        }
+
         // Single UI instance (SPEC §9): the second launch signals the first and exits.
         _singleInstance = new Mutex(initiallyOwned: true, @"Local\CaptrUi" + Core.Common.CaptrPaths.InstanceSuffix, out bool isFirst);
         _focusSignal = new EventWaitHandle(false, EventResetMode.AutoReset, FocusSignalName);
