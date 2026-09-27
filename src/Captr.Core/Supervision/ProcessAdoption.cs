@@ -59,7 +59,7 @@ public static class ProcessAdoption
 
             if (startTimeMatches && imageMatches && !candidate.HasExited)
             {
-                return FfmpegProcess.Adopt(candidate);
+                return FfmpegProcess.Adopt(candidate, bundledFfmpegPath);
             }
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)

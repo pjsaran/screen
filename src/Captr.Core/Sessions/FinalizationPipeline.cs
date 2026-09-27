@@ -87,6 +87,7 @@ public sealed class FinalizationPipeline
         CoverageReport coverage = CoverageCalculator.Compute(events, fallbackEnd);
 
         TimeSpan summedSegments = TimeSpan.FromTicks(segments.Sum(s => s.Duration.Ticks));
+        coverage = AccountForMissingFootage(coverage, summedSegments, notes);
         TimeSpan discrepancy = (summedSegments - coverage.RecordedSpan).Duration();
         string? reconciliationNote = null;
         if (discrepancy > ReconciliationTolerance(coverage.RecordedSpan))
@@ -200,6 +201,35 @@ public sealed class FinalizationPipeline
             Duration: probe.Duration,
             SizeBytes: new FileInfo(path).Length,
             Sha256: await HashFileAsync(path, cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// The journal says when recording HAPPENED; only the segments say what footage
+    /// EXISTS. When a segment is unrepairable, or an encoder stopped abruptly took its
+    /// unwritten tail with it, the two disagree - and coverage computed from the
+    /// journal alone reported the missing time as recorded: a recovery with no
+    /// playable footage at all was logged as "29 s recovered, nothing lost, 100 %".
+    /// The shortfall is now a gap, in the integrity record and in every report.
+    /// </summary>
+    internal static CoverageReport AccountForMissingFootage(CoverageReport coverage, TimeSpan footage, List<string> notes)
+    {
+        // At least three seconds: an encoder takes a moment to produce its first frame
+        // after the journal says the session started, and that is not lost footage.
+        // What this exists to catch - an unflushed tail, an unrepairable segment - is
+        // seconds to minutes.
+        TimeSpan missing = coverage.RecordedSpan - footage;
+        TimeSpan tolerance = TimeSpan.FromTicks(Math.Max(ReconciliationTolerance(coverage.RecordedSpan).Ticks, TimeSpan.FromSeconds(3).Ticks));
+        if (missing <= tolerance)
+        {
+            return coverage;
+        }
+
+        var lost = new CoverageGap(
+            coverage.EndUtc - missing, missing,
+            "footage lost: a segment could not be recovered, or the encoder's last unwritten output was lost when it stopped abruptly",
+            IsPause: false);
+        notes.Add($"{Math.Round(missing.TotalSeconds):0} s of the time recorded has no footage on disk (see the gap marked 'footage lost').");
+        return coverage with { RecordedSpan = footage, Gaps = [.. coverage.Gaps, lost] };
     }
 
     /// <summary>"seg-g02-20260819-101500.mkv" → 2. Group 1 assumed for foreign names

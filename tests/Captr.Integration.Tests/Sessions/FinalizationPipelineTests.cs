@@ -126,6 +126,39 @@ public class FinalizationPipelineTests : IDisposable
     }
 
     [Fact]
+    public async Task Time_the_journal_says_was_recorded_but_no_footage_holds_is_reported_as_lost()
+    {
+        // Recovery once logged "29 s of footage recovered, nothing lost, coverage 100 %"
+        // for a session whose only segment could not be repaired - it had produced no
+        // playable footage at all. The journal says when recording HAPPENED; only the
+        // segments say what EXISTS.
+        string folder = await RecordSessionAsync("short-footage", seconds: 4, killHard: false);
+        string journal = Path.Combine(folder, SessionJournal.FileName);
+        string[] lines = await File.ReadAllLinesAsync(journal, TestContext.Current.CancellationToken);
+        // The session "started" 30 s before the footage did: 26 s with nothing on disk.
+        lines[0] = lines[0].Replace(
+            System.Text.Json.JsonDocument.Parse(lines[0]).RootElement.GetProperty("timestampUtc").GetString()!,
+            DateTimeOffset.UtcNow.AddSeconds(-34).ToString("O"), StringComparison.Ordinal);
+        await File.WriteAllLinesAsync(journal, lines, TestContext.Current.CancellationToken);
+
+        FinalizationResult result = await MakePipeline().RunAsync(folder, TestContext.Current.CancellationToken);
+
+        result.Coverage.RecordedSpan.ShouldBeLessThan(TimeSpan.FromSeconds(8), "only what is on disk counts as recorded");
+        result.Coverage.Gaps.ShouldContain(gap => gap.Reason.StartsWith("footage lost") && gap.Duration > TimeSpan.FromSeconds(20));
+        result.Coverage.Coverage.ShouldBeLessThan(0.5);
+    }
+
+    [Fact]
+    public async Task A_normal_recording_reports_no_lost_footage()
+    {
+        string folder = await RecordSessionAsync("normal", seconds: 5, killHard: false);
+
+        FinalizationResult result = await MakePipeline().RunAsync(folder, TestContext.Current.CancellationToken);
+
+        result.Coverage.Gaps.ShouldNotContain(gap => gap.Reason.StartsWith("footage lost"));
+    }
+
+    [Fact]
     public async Task A_single_segment_recording_is_finalised_without_a_second_copy_of_the_footage()
     {
         // The output of a one-segment recording used to be a full COPY of it, doubling

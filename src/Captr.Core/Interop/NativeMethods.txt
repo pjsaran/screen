@@ -111,3 +111,11 @@ HWND_BROADCAST
 
 // --- Finalisation: a single-segment output is a hard link, not a second copy ---
 CreateHardLink
+
+// --- Asking an ADOPTED encoder to stop cleanly: Ctrl+C on its console (Supervision/ConsoleSignal) ---
+AttachConsole
+FreeConsole
+GetConsoleWindow
+GenerateConsoleCtrlEvent
+SetConsoleCtrlHandler
+CTRL_C_EVENT

@@ -18,11 +18,13 @@ public sealed class FfmpegProcess : IDisposable
 
     private readonly Process _process;
     private readonly bool _adopted;
+    private readonly string _imagePath;
 
-    private FfmpegProcess(Process process, bool adopted)
+    private FfmpegProcess(Process process, bool adopted, string imagePath)
     {
         _process = process;
         _adopted = adopted;
+        _imagePath = imagePath;
     }
 
     /// <summary>Process id, for the journal's re-adoption record.</summary>
@@ -31,8 +33,11 @@ public sealed class FfmpegProcess : IDisposable
     /// <summary>Process start time (UTC) — with the PID, defeats PID reuse.</summary>
     public DateTimeOffset StartTimeUtc => new(_process.StartTime.ToUniversalTime());
 
-    /// <summary>Full image path, third leg of the re-adoption match.</summary>
-    public string ImagePath => _process.MainModule?.FileName ?? string.Empty;
+    /// <summary>Full image path, third leg of the re-adoption match. The path this
+    /// process was launched from, not a query of the running process: that query
+    /// throws if FFmpeg has already exited (a bad argument ends it at once), which
+    /// escaped before the launch was journaled and left an unrecorded orphan.</summary>
+    public string ImagePath => _imagePath;
 
     public bool HasExited => _process.HasExited;
 
@@ -75,20 +80,21 @@ public sealed class FfmpegProcess : IDisposable
         var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException($"FFmpeg failed to start from {ffmpegPath}.");
 
-        return new FfmpegProcess(process, adopted: false);
+        return new FfmpegProcess(process, adopted: false, Path.GetFullPath(ffmpegPath));
     }
 
     /// <summary>Wraps an already-running process found by
-    /// <see cref="ProcessAdoption"/>. An adopted process has no stdin pipe, so it
-    /// cannot be stopped gracefully — see <see cref="StopAsync"/>.</summary>
-    public static FfmpegProcess Adopt(Process process) => new(process, adopted: true);
+    /// <see cref="ProcessAdoption"/>. An adopted process has no stdin pipe to send
+    /// 'q' on; it is asked to stop with Ctrl+C instead — see <see cref="StopAsync"/>.</summary>
+    public static FfmpegProcess Adopt(Process process, string imagePath) => new(process, adopted: true, imagePath);
 
     /// <summary>
-    /// Stops the encoder: asks politely with <c>'q'</c>, waits the grace period so
-    /// the current segment closes cleanly, then kills. Adopted processes cannot be
-    /// asked (their stdin belongs to a dead host), so they are killed after the
-    /// grace period — the segment in progress is repaired by finalisation, which is
-    /// exactly the path a crash exercises anyway (SPEC §6).
+    /// Stops the encoder: asks politely, waits the grace period so the current segment
+    /// closes cleanly, then kills. A process this host launched is asked with
+    /// <c>'q'</c> on its stdin; an ADOPTED one (its stdin belonged to a dead host) is
+    /// asked with Ctrl+C on its console (<see cref="ConsoleSignal"/>). Only if that is
+    /// impossible, or ignored, is it killed — and the segment in progress is then
+    /// repaired by finalisation, the path a crash exercises anyway (SPEC §6).
     /// </summary>
     /// <returns>True when the process ended gracefully, false when it was killed.</returns>
     public async Task<bool> StopAsync(CancellationToken cancellationToken)
@@ -98,7 +104,11 @@ public sealed class FfmpegProcess : IDisposable
             return true;
         }
 
-        if (!_adopted)
+        if (_adopted)
+        {
+            ConsoleSignal.TrySendCtrlC(_process.Id);
+        }
+        else
         {
             try
             {
@@ -137,11 +147,17 @@ public sealed class FfmpegProcess : IDisposable
             if (!_process.HasExited)
             {
                 _process.Kill(entireProcessTree: true);
+
+                // Termination is asynchronous. Returning at once let finalisation or
+                // the next launch start while the dying process still held the last
+                // segment open.
+                _process.WaitForExit(TimeSpan.FromSeconds(10));
             }
         }
-        catch (InvalidOperationException)
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            // Exited between the check and the kill — the desired outcome.
+            // Exited between the check and the kill (the desired outcome), or already
+            // being torn down by Windows.
         }
     }
 
