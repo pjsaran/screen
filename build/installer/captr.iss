@@ -65,6 +65,14 @@ UninstallDisplayIcon={app}\Captr.App.exe
 CloseApplications=yes
 RestartApplications=no
 WizardStyle=modern
+#ifdef CaptrSign
+; Defined by make-installer.ps1 only when a signing method is configured: Inno then
+; runs build/Sign-Artifacts.ps1 ("captrsign", passed with /S) on setup itself AND on
+; the uninstaller it embeds - otherwise unins000.exe would ship unsigned, and
+; Windows would call Captr's own uninstaller an unknown publisher.
+SignTool=captrsign
+SignedUninstaller=yes
+#endif
 
 [Tasks]
 Name: "shortcuts"; Description: "Create a Start Menu shortcut"
@@ -74,7 +82,9 @@ Name: "shortcuts"; Description: "Create a Start Menu shortcut"
 Name: "addtopath"; Description: "Add Captr to my PATH so I can run 'captr' from a terminal"
 
 [Files]
-Source: "..\..\publish\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+; Symbols and XML docs are archived, not shipped (build.ps1 moves them out of publish/);
+; the Excludes is a second line of defence against a stale publish/ folder.
+Source: "..\..\publish\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: recursesubdirs ignoreversion
 
 [Icons]
 Name: "{autoprograms}\Captr"; Filename: "{app}\Captr.App.exe"; Tasks: shortcuts

@@ -29,6 +29,8 @@ param(
     [switch]$Publish,
     # Overrides the integration-test selection entirely. Empty = the default below.
     [string]$TestFilter = '',
+    # Fail instead of warning when no signing method is configured (releases).
+    [switch]$RequireSigning,
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent)
 )
 
@@ -114,9 +116,12 @@ try {
         if (Test-Path $pubDir) { Remove-Item $pubDir -Recurse -Force } # idempotent: no stale files
         # App first, then CLI into the SAME folder so the self-contained runtime is
         # shared once (SPEC §4: one install payload).
-        dotnet publish (Join-Path $RepoRoot 'src\Captr.App\Captr.App.csproj') -c $Configuration -r win-x64 --self-contained -o $pubDir
+        # ContinuousIntegrationBuild: the binaries record source paths as /_/... rather
+        # than this machine's folders, so the same commit builds the same bytes anywhere.
+        $publishArgs = @('-c', $Configuration, '-r', 'win-x64', '--self-contained', '-o', $pubDir, '-p:ContinuousIntegrationBuild=true')
+        dotnet publish (Join-Path $RepoRoot 'src\Captr.App\Captr.App.csproj') @publishArgs
         if ($LASTEXITCODE -ne 0) { throw 'Publish (App) failed.' }
-        dotnet publish (Join-Path $RepoRoot 'src\Captr.Cli\Captr.Cli.csproj') -c $Configuration -r win-x64 --self-contained -o $pubDir
+        dotnet publish (Join-Path $RepoRoot 'src\Captr.Cli\Captr.Cli.csproj') @publishArgs
         if ($LASTEXITCODE -ne 0) { throw 'Publish (CLI) failed.' }
 
         # The CLI ships as captr.exe but its ASSEMBLY is Captr.Cli (see the csproj
@@ -124,14 +129,49 @@ try {
         # only the apphost is safe - it locates Captr.Cli.dll by embedded name.
         Move-Item (Join-Path $pubDir 'Captr.Cli.exe') (Join-Path $pubDir 'captr.exe') -Force
 
-        # Bundle the encoder + its licence texts next to the app (SPEC §2).
+        # Bundle the encoder + its licence texts next to the app (SPEC §2). The shipped
+        # capabilities.json leaves out when THIS machine happened to fetch FFmpeg, so
+        # the payload depends on the commit and nothing else.
         $ffDir = Join-Path $pubDir 'ffmpeg'
         New-Item -ItemType Directory -Force $ffDir | Out-Null
         Copy-Item (Join-Path $RepoRoot 'tools\ffmpeg\bin\*') $ffDir -Force
-        Copy-Item (Join-Path $RepoRoot 'tools\ffmpeg\capabilities.json') $ffDir -Force
+        $capabilities = Get-Content (Join-Path $RepoRoot 'tools\ffmpeg\capabilities.json') -Raw | ConvertFrom-Json
+        $capabilities.PSObject.Properties.Remove('fetchedAtUtc')
+        $capabilities | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $ffDir 'capabilities.json') -Encoding utf8
         Copy-Item (Join-Path $RepoRoot 'tools\ffmpeg\licenses') (Join-Path $ffDir 'licenses') -Recurse -Force
 
-        & (Join-Path $PSScriptRoot 'sign.ps1') -Target $pubDir
+        # Symbols are ARCHIVED with the release, never shipped: a PDB beside the
+        # binary helps nobody on a user's machine and carries build-machine detail.
+        # The XML documentation files are IDE help for developers - not shipped either.
+        $symbols = Join-Path $RepoRoot 'artifacts\symbols'
+        if (Test-Path $symbols) { Remove-Item $symbols -Recurse -Force }
+        New-Item -ItemType Directory -Force $symbols | Out-Null
+        Get-ChildItem $pubDir -Filter 'Captr*.pdb' | Move-Item -Destination $symbols -Force
+        Get-ChildItem $pubDir -Filter 'Captr*.xml' | Remove-Item -Force
+
+        # Licence and third-party notices ship with the product (SPEC §2): the
+        # packages' licences, the .NET runtime's own notices (the runtime is bundled
+        # self-contained), and the FFmpeg source offer, which GPLv3 §6 requires to
+        # accompany the binary. docs/ffmpeg-source-offer.md stays where it is - build
+        # tooling and the docs reference it by that path - and is copied, not moved.
+        $notices = Join-Path $pubDir 'licenses'
+        New-Item -ItemType Directory -Force $notices | Out-Null
+        Copy-Item (Join-Path $RepoRoot 'build\licenses\THIRD-PARTY.md') $notices -Force
+        Copy-Item (Join-Path $RepoRoot 'docs\ffmpeg-source-offer.md') (Join-Path $notices 'FFMPEG-SOURCE-OFFER.md') -Force
+        $runtimeVersion = (Get-Content (Join-Path $pubDir 'Captr.App.runtimeconfig.json') -Raw | ConvertFrom-Json).runtimeOptions.includedFrameworks |
+            Where-Object name -eq 'Microsoft.NETCore.App' | Select-Object -ExpandProperty version
+        $runtimePack = Join-Path $env:USERPROFILE ".nuget\packages\microsoft.netcore.app.runtime.win-x64\$runtimeVersion"
+        if ($env:NUGET_PACKAGES) { $runtimePack = Join-Path $env:NUGET_PACKAGES "microsoft.netcore.app.runtime.win-x64\$runtimeVersion" }
+        foreach ($notice in 'LICENSE.TXT', 'THIRD-PARTY-NOTICES.TXT') {
+            $source = Join-Path $runtimePack $notice
+            if (-not (Test-Path $source)) { throw "The .NET runtime's $notice was not found at $source; it must ship with the self-contained runtime." }
+            Copy-Item $source (Join-Path $notices "DOTNET-$notice") -Force
+        }
+
+        # Sign what we ship (inner binaries first; the installer is signed as it is
+        # built). FFmpeg is signed only after its pinned digest is verified. Without
+        # a configured method this warns and continues - unless signing is required.
+        & (Join-Path $PSScriptRoot 'Sign-Artifacts.ps1') -Path $pubDir -Require:$RequireSigning
 
         # The published payload exists only now, so the tests that drive it run
         # here rather than in step 5 with everything else.
@@ -145,7 +185,7 @@ try {
 
     if ($Installer) {
         Write-Host '== 7/7 Installer ==============================================' -ForegroundColor Cyan
-        & (Join-Path $PSScriptRoot 'make-installer.ps1')
+        & (Join-Path $PSScriptRoot 'make-installer.ps1') -RequireSigning:$RequireSigning
     }
 
     Write-Host 'Build pipeline completed.' -ForegroundColor Green

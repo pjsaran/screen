@@ -1,0 +1,53 @@
+{
+  "//": [
+    "Pins for the code-signing TOOLS (never credentials - those come only from environment",
+    "variables, the certificate store, or CI secrets; see docs/developer-guide/releasing.md).",
+    "Both packages are fetched from nuget.org into tools/signing by Sign-Artifacts.ps1 and",
+    "verified against the SHA-512 that nuget.org itself publishes for the package (its",
+    "catalog 'packageHash'), NOT a hash of whatever happened to download. Nothing here is",
+    "installed system-wide and nothing here ships in the product.",
+    "To upgrade: pick a version on nuget.org, copy packageHash from",
+    "https://api.nuget.org/v3/registration5-gz-semver2/<id>/<version>.json -> catalogEntry,",
+    "update the entry, and run build/Sign-Artifacts.ps1 -DryRun, then a real signing run."
+  ],
+  "signtool": {
+    "package": "Microsoft.Windows.SDK.BuildTools",
+    "version": "10.0.28000.2705",
+    "sha512": "47kp42eMb8rF3bjDuZHVkzGRb9Fr7wyFZDIT2sWr3StwnTCoDHIisDe0SPWGwerwVUw/eQQO/OxDb0YYHbfNvA==",
+    "path": "bin/10.0.28000.0/x64/signtool.exe"
+  },
+  "artifactSigningClient": {
+    "//": "Azure Artifact Signing (formerly Trusted Signing). Only fetched when that method is used.",
+    "package": "Microsoft.ArtifactSigning.Client",
+    "version": "1.0.128",
+    "sha512": "mPBqaR9Pwvoi8Z3PhVZzPphgf775GjEsRTubB5jMkIja4KyzbjibVSoRtNIyAyR4W4VBwrUQkackwFvF31y/lQ==",
+    "dlibPath": "bin/x64/Azure.CodeSigning.Dlib.dll"
+  },
+  "timestampServers": {
+    "//": "RFC 3161 servers, tried in order; each is retried before moving to the next. Plain http is normal for RFC 3161: the response is itself signed by the timestamp authority.",
+    "default": [
+      "http://timestamp.digicert.com",
+      "http://timestamp.sectigo.com",
+      "http://timestamp.globalsign.com/tsa/r6advanced1"
+    ],
+    "artifactSigning": [
+      "http://timestamp.acs.microsoft.com",
+      "http://timestamp.digicert.com"
+    ]
+  },
+  "trustedThirdPartyPublishers": {
+    "//": "Signers whose EXISTING signatures on shipped third-party files are accepted as they are (the .NET runtime, WPF, and friends). Anything they did not sign, Captr signs itself. Matched against the signing certificate's common name.",
+    "names": [
+      ".NET",
+      ".NET DAC",
+      "Microsoft Corporation",
+      "Microsoft Windows",
+      "Microsoft Windows Software Compatibility Publisher",
+      "Community Toolkit (.NET Foundation)"
+    ]
+  },
+  "ownFilePatterns": {
+    "//": "Files that must carry CAPTR's signature and no one else's: our own binaries, the bundled FFmpeg (signed by us after its pinned digest is verified), and the installer and uninstaller.",
+    "patterns": [ "Captr.*", "captr.exe", "captr-setup-*.exe", "unins*.exe", "ffmpeg.exe", "ffprobe.exe" ]
+  }
+}
