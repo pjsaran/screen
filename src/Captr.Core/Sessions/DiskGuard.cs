@@ -105,7 +105,7 @@ public sealed class DiskGuard
     public void ReserveBallast()
     {
         _ballastPath = Path.Combine(_workingFolder, "ballast.bin");
-        Directory.CreateDirectory(_workingFolder);
+        Common.PrivateFolder.Create(_workingFolder);
         using var stream = new FileStream(_ballastPath, FileMode.Create, FileAccess.Write, FileShare.None);
         stream.SetLength(BallastBytes);
     }

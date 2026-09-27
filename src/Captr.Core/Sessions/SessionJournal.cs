@@ -41,7 +41,7 @@ public sealed class SessionJournal : IDisposable
     /// <see cref="SessionStarted"/> event as the first line.</summary>
     public static SessionJournal CreateNew(string workingFolder, SessionStarted started)
     {
-        Directory.CreateDirectory(workingFolder);
+        Common.PrivateFolder.Create(workingFolder);
         string path = Path.Combine(workingFolder, FileName);
         var stream = new FileStream(
             path, FileMode.CreateNew, FileAccess.Write, FileShare.Read,

@@ -26,7 +26,7 @@ public static class EncoderTrial
     {
         ArrangementPlan arrangement = ArrangementPlanner.Plan(plan.Sources);
         string outputPath = Path.Combine(plan.WorkingFolder, $"trial-{plan.Encoder.CodecName}.mkv");
-        Directory.CreateDirectory(plan.WorkingFolder);
+        Common.PrivateFolder.Create(plan.WorkingFolder);
 
         var arguments = new List<string>
         {
