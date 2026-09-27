@@ -24,7 +24,7 @@ public sealed class DataRootTests : IDisposable
 
     public DataRootTests() => Environment.SetEnvironmentVariable(CaptrPaths.DataRootVariable, _root);
 
-    public void Dispose() => Environment.SetEnvironmentVariable(CaptrPaths.DataRootVariable, null);
+    public void Dispose() => Environment.SetEnvironmentVariable(CaptrPaths.DataRootVariable, SuiteDataRoot.Path);
 
     [Fact]
     public void Every_piece_of_state_follows_the_relocated_root()
