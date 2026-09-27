@@ -8,7 +8,7 @@ namespace Captr.App.Views;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One control rather than five hand-rolled headers. Each page previously built its
+/// One control rather than six hand-rolled headers. Each page previously built its
 /// own title block, and they drifted: different fonts, different vertical positions,
 /// some with a subtitle and some without, Settings with its buttons at the BOTTOM of
 /// the page instead of the top. The result was that the layout visibly moved every

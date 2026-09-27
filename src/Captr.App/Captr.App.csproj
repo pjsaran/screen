@@ -42,7 +42,6 @@
     <PackageReference Include="WPF-UI" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="H.NotifyIcon.Wpf" />
-    <PackageReference Include="Serilog.Extensions.Hosting" />
   </ItemGroup>
 
 </Project>

@@ -60,8 +60,6 @@
 | Microsoft.Windows.WDK.Win32Metadata | 0.13.25-experimental | build-time only, not redistributed (see exemption note in check-licenses.ps1) |
 | NSubstitute | 6.2.0 | BSD-3-Clause |
 | Serilog | 4.4.0 | Apache-2.0 |
-| Serilog.Extensions.Hosting | 10.0.0 | Apache-2.0 |
-| Serilog.Extensions.Logging | 10.0.0 | Apache-2.0 |
 | Serilog.Sinks.File | 7.0.0 | Apache-2.0 |
 | SharpGen.Runtime | 2.4.2-beta | MIT |
 | SharpGen.Runtime.COM | 2.4.2-beta | MIT |

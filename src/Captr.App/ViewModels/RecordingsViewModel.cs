@@ -64,9 +64,6 @@ public sealed partial class RecordingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _message = "";
 
-    [ObservableProperty]
-    private string _workingFolder = "";
-
     /// <summary>True once there is at least one recording to show. The table (header
     /// strip and all) is hidden until then, so an empty page is the empty-state
     /// message alone rather than a set of column headings over nothing.</summary>
@@ -81,7 +78,6 @@ public sealed partial class RecordingsViewModel : ObservableObject, IDisposable
     {
         CaptrSettings settings = _settings.Load();
         string folder = settings.WorkingFolder;
-        WorkingFolder = folder;
 
         string[] destinations = [.. settings.Destinations.Where(d => d.Enabled).Select(d => d.Name)];
 
@@ -112,17 +108,6 @@ public sealed partial class RecordingsViewModel : ObservableObject, IDisposable
             : "";
     }
 
-    /// <summary>
-    /// For each recording, which enabled destinations do NOT yet have every one of
-    /// its output files. That is exactly the set "send again" would do something
-    /// about, so it is also what decides whether the button is offered at all.
-    /// </summary>
-    /// <remarks>
-    /// Read straight from the transfer queue rather than asked of the host, for the
-    /// same reason the list itself is: opening a page must not start a recording host.
-    /// A queue that cannot be opened is not an error here — every recording simply
-    /// looks un-sent, which errs towards offering the action rather than hiding it.
-    /// </remarks>
     /// <summary>Opens the transfer queue, or null when it cannot be opened. A queue
     /// that will not open is not a reason to fail the recordings list.</summary>
     private static TransferQueue? TryOpenQueue()

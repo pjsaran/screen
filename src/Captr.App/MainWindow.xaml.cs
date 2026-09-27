@@ -14,7 +14,7 @@ using Captr.Core.Settings;
 namespace Captr.App;
 
 /// <summary>
-/// The application shell: navigation between the five pages, the always-visible
+/// The application shell: navigation between the six pages, the always-visible
 /// state readout on the rail, the tray icon (SPEC §9), close-to-tray,
 /// minimise-while-recording, the quit-while-recording guard (defaulting to continue
 /// recording), and the paused-state reminders. Holds no recording state — everything

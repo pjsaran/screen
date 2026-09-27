@@ -5,7 +5,7 @@
     x:Name="Root">
     <!--
         The top of every page: the page's name on the left, its page-level actions on
-        the right. One control so all five pages are laid out identically instead of
+        the right. One control so all six pages are laid out identically instead of
         each hand-rolling a header that ends up a few pixels different from the last.
 
         It is deliberately OUTSIDE any ScrollViewer on every page, so the title and

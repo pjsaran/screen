@@ -56,13 +56,22 @@ public sealed class DisplayPreviewService : IDisposable
             return null;
         }
 
-        OutputCapture? capture = _captures.GetOrAdd(
-            (adapterIndex, outputIndexOnAdapter),
-            key => OutputCapture.TryCreate(key.Adapter, key.Output)!);
-
-        if (capture is null)
+        // A failure is NOT cached: GetOrAdd stored the null, so a display whose
+        // duplication failed once (a mode change, a UAC prompt) stayed blank until the
+        // page was left. The next refresh simply tries again.
+        if (!_captures.TryGetValue((adapterIndex, outputIndexOnAdapter), out OutputCapture? capture))
         {
-            return null;
+            capture = OutputCapture.TryCreate(adapterIndex, outputIndexOnAdapter);
+            if (capture is null)
+            {
+                return null;
+            }
+
+            if (!_captures.TryAdd((adapterIndex, outputIndexOnAdapter), capture))
+            {
+                capture.Dispose();
+                capture = _captures[(adapterIndex, outputIndexOnAdapter)];
+            }
         }
 
         BitmapSource? frame = capture.TryGrabFrame();
@@ -149,7 +158,7 @@ public sealed class DisplayPreviewService : IDisposable
         }
 
         /// <summary>The newest frame, or null when nothing arrived in time.</summary>
-        public TransformedBitmap? TryGrabFrame()
+        public WriteableBitmap? TryGrabFrame()
         {
             lock (_gate)
             {
@@ -188,7 +197,7 @@ public sealed class DisplayPreviewService : IDisposable
             }
         }
 
-        private TransformedBitmap CopyToBitmap(ID3D11Texture2D screenTexture)
+        private WriteableBitmap CopyToBitmap(ID3D11Texture2D screenTexture)
         {
             Texture2DDescription description = screenTexture.Description;
             var stagingDescription = description with
@@ -208,8 +217,13 @@ public sealed class DisplayPreviewService : IDisposable
                 var full = BitmapSource.Create(
                     (int)description.Width, (int)description.Height, 96, 96, PixelFormats.Bgra32, null,
                     mapped.DataPointer, (int)(mapped.RowPitch * description.Height), (int)mapped.RowPitch);
-                var thumbnail = new TransformedBitmap(
+                var scaled = new TransformedBitmap(
                     full, new ScaleTransform(1.0 / DownscaleFactor, 1.0 / DownscaleFactor));
+
+                // Copied into a bitmap of its own: a TransformedBitmap keeps its full
+                // source alive - about 33 MB for a 4K display, a fresh large-object
+                // allocation every refresh, held for as long as the tile shows it.
+                var thumbnail = new WriteableBitmap(scaled);
 
                 // Frozen so the UI thread may use a bitmap produced here.
                 thumbnail.Freeze();
