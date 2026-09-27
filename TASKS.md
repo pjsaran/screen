@@ -37,6 +37,7 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 - [x] REC-5 software-fallback arguments are frozen at start (wrong displays, fps, segment group)
 - [x] REC-6 `captr recover` during a recording adopts and kills the live encoder
 - [x] REC-7 finalisation needs a second full copy of the footage; fails exactly when the disk is low
+- [x] BLD-9 tracked version.iss rewritten by every build, blocking new-release
 - [x] REC-9 execution state is per-thread; the display-required request can vanish mid-recording
 - [x] TST-2 hardware tests ran against a stale publish/ and tested old code
 - [x] REC-19 recovery reported lost footage as recorded (coverage counted from the journal, not disk)
@@ -51,14 +52,14 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 
 ## Medium — fixed where low-risk
 
-- [ ] SEC-2 session folders inherit "Authenticated Users: Modify" under a drive root
+- [x] SEC-2 session folders inherit "Authenticated Users: Modify" under a drive root
 - [x] SEC-8 (=BLD-3) setup kills every user's host and checks recording state as the wrong user
-- [ ] SEC-9 retention matches sessions by string prefix and can delete an un-transferred folder
+- [x] SEC-9 retention matches sessions by string prefix and can delete an un-transferred folder
 - [x] BLD-5 PATH change not broadcast (`ChangesEnvironment`)
 - [x] BLD-6 PFX password on signtool's command line
 - [x] BLD-7 signing env var names disagree across scripts and docs
 - [x] BLD-8 signing covers 4 files, no uninstaller, no verification, `signed` flag is env-var presence
-- [ ] BLD-10 `verify-install.ps1` edits the wrong settings file and never restores it
+- [x] BLD-10 `verify-install.ps1` edits the wrong settings file and never restores it
 - [x] BLD-11 `/WORKINGFOLDER` trailing backslash breaks the quoted argument
 - [x] BLD-13 PDBs, XML docs shipped; builds not reproducible (paths, timestamps)
 - [~] BLD-16 notices and the source offer now ship (fixed); no contact address for the offer (needs you)
@@ -73,54 +74,54 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 - [x] REC-11 slow-encoding warning fires once per session
 - [x] REC-12 kill without waiting for exit; `MainModule` read races process start
 - [x] XFR-4 Test connection passes a wrong secret from the MSAL token cache
-- [ ] XFR-6 support bundle skips the live host log
-- [ ] XFR-7 support bundle: user/machine/path not redacted, user not told what it contains, over-redaction
-- [ ] XFR-8 Send again twice queues duplicate uploads
+- [x] XFR-6 support bundle skips the live host log
+- [x] XFR-7 support bundle: user/machine/path not redacted, user not told what it contains, over-redaction
+- [x] XFR-8 Send again twice queues duplicate uploads
 - [x] XFR-9 Stop can be overwritten by the worker; timer callback can crash the host
-- [ ] XFR-10 SharePoint upload verified by size only
+- [~] XFR-10 SharePoint upload verified by size only (deferred: needs a tenant to validate QuickXorHash; see REVIEW Decisions)
 - [x] XFR-11 Diagnostics reports invalid settings as OK and is not read-only
 - [x] UI-5 status poll loop dies permanently on an unexpected exception
-- [ ] UI-7 hotkeys: not re-registered on save, not validated, self-clash misreported, Shift+letter accepted
-- [ ] UI-8 Tab is trapped in the hotkey box and clears the hotkey
-- [ ] UI-9 adding a destination with a duplicate name overwrites the other's secret
-- [ ] UI-10 libx264 labelled "Hardware accelerated"
-- [ ] UI-11 Reset to defaults: no confirmation, bypasses lock, orphans secrets
-- [ ] UI-12 Transfers action errors never shown; queue construction can crash startup
+- [x] UI-7 hotkeys: not re-registered on save, not validated, self-clash misreported, Shift+letter accepted
+- [x] UI-8 Tab is trapped in the hotkey box and clears the hotkey
+- [x] UI-9 adding a destination with a duplicate name overwrites the other's secret
+- [x] UI-10 libx264 labelled "Hardware accelerated"
+- [x] UI-11 Reset to defaults: no confirmation, bypasses lock, orphans secrets
+- [x] UI-12 Transfers action errors never shown; queue construction can crash startup
 
 ## Low — fixed if trivial, otherwise recorded with a recommendation
 
-- [ ] SEC-5 re-send/verify trust `integrity.json` file names
+- [x] SEC-5 re-send/verify trust `integrity.json` file names
 - [~] SEC-10 upload URL now must be https (fixed); certificate credential unsupported (deferred)
 - [x] SEC-12 `.partial` opened with FileMode.Create in shared folders
 - [x] REC-14 finalisation picks up leftover `.repaired.mkv` files
-- [ ] REC-16 dead overlay path with a latent `%` escaping bug; other dead parameters
-- [ ] REC-17 chaos test assertion always true
+- [x] REC-16 overlay `%`/`\` escaping fixed and proved on FFmpeg; dead parameters left (recorded)
+- [x] REC-17 chaos test assertion always true
 - [x] REC-18 disk-guard double-counts the ballast
 - [x] XFR-12 folder copy not flushed to disk; `.partial` left on cancel
-- [ ] XFR-13 renaming a destination deletes its old secret before save
-- [ ] XFR-14 no certificate credential (see SEC-10)
+- [x] XFR-13 renaming a destination deletes its old secret before save
+- [~] XFR-14 no certificate credential (deferred; see REVIEW Decisions)
 - [x] XFR-15 408/423 treated as permanent; Retry-After dates ignored
 - [x] XFR-16 no worker-level transfer tests
-- [ ] CLI-15 `resend` relative path resolved in the host's directory
+- [x] CLI-15 `resend` relative path resolved in the host's directory
 - [x] CLI-16 retry/stop report success for unknown ids
 - [x] CLI-17 pause/resume report a state they did not check
 - [x] CLI-18 reserved names incomplete; not applied to folder segments
 - [x] CLI-19 destination folder validation accepts relative/ADS paths
 - [x] CLI-20 client leaks a pipe handle on a failed handshake
-- [~] CLI-21 malformed envelope now logged (fixed); IPC request timeouts (open)
+- [x] CLI-21 malformed envelope logged; IPC request time limits
 - [ ] CLI-22 Ctrl+C exit code 130 undocumented
-- [ ] CLI-23 masked secret entry: non-BMP, unwiped buffers, no console
-- [ ] UI-13 Transfers refresh pile-up and focus loss
-- [ ] UI-14 display preview caches a failure; keeps full-res bitmaps
-- [ ] UI-15 starting/suspended states fall through to Idle
-- [ ] UI-16 second launch cannot bring the window to the front
-- [ ] UI-17 dead code and stale comments in the App
+- [x] CLI-23 masked secret entry: non-BMP, unwiped buffers, no console
+- [x] UI-13 Transfers refresh pile-up and focus loss
+- [x] UI-14 display preview caches a failure; keeps full-res bitmaps
+- [x] UI-15 starting/suspended states fall through to Idle
+- [x] UI-16 second launch cannot bring the window to the front
+- [x] UI-17 dead code and stale comments in the App
 - [x] BLD-12 uninstall has no running-recording check
-- [ ] BLD-14 pre-release versions accepted but break the build
+- [x] BLD-14 pre-release versions accepted but break the build
 - [ ] BLD-15 docs call the GPL FFmpeg build LGPL
 - [x] BLD-17 CI: actions not SHA-pinned, no permissions block, no timeout
 - [x] BLD-18 normalise-line-endings regex never matches Windows paths; BOMs committed
-- [ ] BLD-20 release script details (local-only tag check, notes not attached, Inno not re-verified)
+- [x] BLD-20 release script details (local-only tag check, notes not attached, Inno not re-verified)
 - [ ] DOC-1 `design-decisions.md` has contradictory tray-icon entries; docs disagree on blinking
 - [ ] DOC-2 `architecture.md` says settings are in `%APPDATA%`
 
@@ -146,13 +147,13 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 
 ## UX (targeted; existing style kept)
 
-- [ ] First run: default folder shown, quick test recording
+- [x] First run: default folder shown, quick test recording
 - [x] Recording state always visible; unmistakable failure signal (UI-2)
-- [ ] Plain-language errors with a next step
-- [ ] Transfer progress, retries and queue visible outside the Transfers page
-- [ ] Naming-pattern live preview that flags invalid output
-- [ ] Hotkey conflict detection (UI-7)
-- [ ] Accessibility: screen-reader names, live regions, keyboard (UI-8), high contrast
+- [x] Plain-language errors with a next step
+- [x] Transfer progress, retries and queue visible outside the Transfers page
+- [x] Naming-pattern live preview that flags invalid output
+- [x] Hotkey conflict detection (UI-7)
+- [x] Accessibility: screen-reader names, live regions, keyboard (UI-8), high contrast
 - [ ] Wording consistent across UI, CLI help and user guide
 
 ## Production readiness
@@ -169,4 +170,11 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 - [ ] `docs/user-guide/` updated for behaviour changes
 - [ ] `docs/developer-guide/` updated for process changes
 - [ ] `docs/developer-guide/release-verification.md` manual checks
-- [ ] `REVIEW.md`
+- [x] `REVIEW.md`
+
+## Found during the work
+
+- [x] Integration suite read and wrote the developer's real settings; now has its own data root
+- [x] A refused start left an empty session folder behind
+- [x] `new-release.ps1` published unsigned releases after a warning
+- [x] FFmpeg adoption unit test raced `MainModule` and failed intermittently
