@@ -4,18 +4,29 @@ Captr has no built-in scheduler, on purpose. Windows already has a good one, and
 second one running in the background is exactly the kind of resident thing Captr
 avoids. Scheduled recording is a Task Scheduler task that runs `captr`.
 
-## ⚠ The one setting that will otherwise cost you a day
+## ⚠ The one setting that will otherwise cost you a recording
 
 > **The task MUST be set to "Run only when user is logged on".**
 >
 > Choosing "Run whether user is logged on or not" puts the task in **session 0**,
-> where the Windows screen-capture API cannot see your desktop. The recording will
-> start. It will report success. It will produce files of exactly the right size.
-> **Every frame will be black.**
+> where the Windows screen-capture API cannot see your desktop. Capture would start,
+> the files would grow, and **every frame would be black** — Windows itself raises
+> no error. This is a Windows platform boundary. No setting in Captr can work around
+> it, and no recorder can.
 >
-> There is no error, because as far as the capture API is concerned session 0 *is*
-> a desktop — it is just not yours. This is a Windows platform boundary. No setting
-> in Captr can work around it, and no recorder can.
+> So Captr refuses. `captr start` in session 0 (or on any window station other than
+> the signed-in user's) records nothing and exits `1` with a message naming the fix:
+>
+> ```
+> Captr cannot record here: it is running in session 0 — a scheduled task set to
+> "Run whether user is logged on or not", or a service — where there is no desktop
+> to capture, so every frame would be black. Set the task to "Run only when user is
+> logged on" (see Scheduling in the user guide).
+> ```
+>
+> The task's **Last Run Result** shows `(0x1)`: the cue to change the setting, found
+> after one run rather than as a black recording discovered afterwards. (Capture the
+> command's output to a file if you want the message itself in a log.)
 
 ## The other settings that matter
 
@@ -32,6 +43,12 @@ In the task's properties:
 
 Captr recovers from being killed, but you still lose the last few seconds. It is
 cheaper not to be killed.
+
+"Do not start a new instance" is safe because `captr` never waits for ever: every
+request to the recorder has a time limit (two minutes; ten for `start` and `stop`;
+an hour for `recover`), after which the command exits `3` saying what to do. A stuck
+recorder therefore costs one run, not every run after it. See
+[time limits](command-line.md#time-limits).
 
 ## Worked example: weekdays, 09:00 to 17:30
 
@@ -74,13 +91,19 @@ Neither can harm a recording, and neither looks like a failure to the scheduler.
 ## Branching on the result
 
 Scripts can rely on the [exit codes](command-line.md#exit-codes): `0` success, `10`
-idle, `11` paused, `1` error, `2` bad usage, `3` no recorder reachable.
+idle, `11` paused, `1` error (including a start refused in session 0), `2` bad
+usage, `3` no recorder reachable or no answer in time.
 
 ```bat
 captr status
 if %ERRORLEVEL%==10 echo Nothing is recording
 if %ERRORLEVEL%==11 echo Recording is PAUSED - someone forgot
 ```
+
+If the recording stopped by itself before the stop task ran — the disk nearly full,
+say — `captr status` still exits `10`, and its message says so: "The last recording
+stopped on its own: …", with the reason. `captr status --json` carries the same in
+`lastOutcome`, while the recorder is still running.
 
 ## Checking a schedule actually worked
 
@@ -92,5 +115,6 @@ captr transfers list
 ```
 
 The recording should be there with the duration you expected, marked finalised, and
-your destinations should have received it. If the video is black, re-read the
-warning at the top of this page.
+your destinations should have received it. If there is no recording at all, look at
+the task's Last Run Result: `(0x1)` usually means the task is set to run whether the
+user is logged on or not — see the warning at the top of this page.
