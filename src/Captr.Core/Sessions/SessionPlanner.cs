@@ -23,6 +23,31 @@ public sealed class SessionPlanner
     public SessionPlanner(ILogger log) => _log = log;
 
     /// <summary>
+    /// A start refused AFTER the encoder trial: the trial created this session's
+    /// folder, and leaving it behind put an empty "recording" in the working folder -
+    /// and in Recordings - for every refused start. Removed unless something in it
+    /// is a real recording (a journal), which it never is at this point.
+    /// </summary>
+    private SessionStartException Refuse(string sessionFolder, string message)
+    {
+        try
+        {
+            if (Directory.Exists(sessionFolder)
+                && !Directory.EnumerateFiles(sessionFolder, SessionJournal.FileName).Any()
+                && !Directory.EnumerateFiles(sessionFolder, "*.mkv").Any())
+            {
+                Directory.Delete(sessionFolder, recursive: true);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _log.Warning("Could not remove the unused session folder {Folder}: {Reason}", sessionFolder, exception.Message);
+        }
+
+        return new SessionStartException(message);
+    }
+
+    /// <summary>
     /// Plans a session or throws <see cref="SessionStartException"/> with the
     /// user-facing reason. On success, returns the context plus the ready-made
     /// SessionStarted journal event.
@@ -140,7 +165,7 @@ public sealed class SessionPlanner
         }
         catch (EncoderSelectionException exception)
         {
-            throw new SessionStartException("No working encoder was found on this machine.\n" + exception.Message);
+            throw Refuse(workingFolder, "No working encoder was found on this machine.\n" + exception.Message);
         }
 
         // The capture method travels with the encoder: whichever combination passed
@@ -156,13 +181,13 @@ public sealed class SessionPlanner
         // encoder trial actually wrote at on this canvas, never a hardcoded table.
         var diskGuard = new DiskGuard(workingFolder, encoderSelection.BytesPerHour);
         long freeBytes = Common.FreeSpace.AvailableBytes(settings.WorkingFolder)
-            ?? throw new SessionStartException(
+            ?? throw Refuse(workingFolder,
                 $"Captr cannot tell how much space is free in the working folder, {settings.WorkingFolder}. " +
                 "If it is on a network share, check the share is reachable; otherwise choose a local folder in Settings.");
         PreflightResult preflight = diskGuard.Preflight(freeBytes);
         if (!preflight.CanStart)
         {
-            throw new SessionStartException(preflight.RefusalMessage!);
+            throw Refuse(workingFolder, preflight.RefusalMessage!);
         }
 
         // 6. Software fallback arguments (SPEC §6's one fallback), when available

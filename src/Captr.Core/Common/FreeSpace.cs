@@ -20,6 +20,14 @@ namespace Captr.Core.Common;
 public static class FreeSpace
 {
     /// <summary>
+    /// Test hook: names a file holding a byte count that replaces the real free space
+    /// on every check, so the end-to-end suite can run a recording out of disk without
+    /// filling one (which needs administrator rights to do safely). Read each time, so
+    /// a test can change it mid-recording. Unset in every real installation.
+    /// </summary>
+    public const string SimulateVariable = "CAPTR_SIMULATE_FREE_BYTES_FILE";
+
+    /// <summary>
     /// Bytes available to the current user on the volume that holds
     /// <paramref name="folder"/>, or null when that cannot be determined (the share
     /// is unreachable, the path is malformed). The folder need not exist yet; its
@@ -27,6 +35,11 @@ public static class FreeSpace
     /// </summary>
     public static long? AvailableBytes(string folder)
     {
+        if (Simulated() is { } simulated)
+        {
+            return simulated;
+        }
+
         string? probe;
         try
         {
@@ -58,5 +71,24 @@ public static class FreeSpace
         return PInvoke.GetDiskFreeSpaceEx(probe, out ulong available, out _, out _)
             ? (long)Math.Min(available, long.MaxValue)
             : null;
+    }
+
+    private static long? Simulated()
+    {
+        if (Environment.GetEnvironmentVariable(SimulateVariable) is not { Length: > 0 } file)
+        {
+            return null;
+        }
+
+        try
+        {
+            return long.TryParse(File.ReadAllText(file).Trim(), System.Globalization.CultureInfo.InvariantCulture, out long bytes)
+                ? bytes
+                : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 }

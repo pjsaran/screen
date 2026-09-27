@@ -162,6 +162,52 @@ public sealed class RecordingEndToEndTests : IDisposable
     }
 
     [Fact]
+    public async Task Starting_without_room_to_record_is_refused_in_plain_terms()
+    {
+        await ConfigureAsync();
+        string free = Path.Combine(_root, "free-bytes.txt");
+        await File.WriteAllTextAsync(free, "1000000", TestContext.Current.CancellationToken);
+
+        CliRun run = await RunWithAsync(PublishedPayload.Cli(), ["start"],
+            new Dictionary<string, string> { [Captr.Core.Common.FreeSpace.SimulateVariable] = free });
+
+        run.ExitCode.ShouldBe(ExitCodes.Error, run.ToString());
+        run.Stderr.ShouldContain("Not enough disk space to start recording");
+        if (Directory.Exists(Work))
+        {
+            Directory.GetDirectories(Work).ShouldBeEmpty("nothing is started, so nothing is left behind");
+        }
+    }
+
+    [Fact]
+    public async Task Running_out_of_disk_mid_recording_stops_cleanly_keeps_the_footage_and_says_why()
+    {
+        await ConfigureAsync();
+        string free = Path.Combine(_root, "free-bytes.txt");
+        await File.WriteAllTextAsync(free, "1000000000000", TestContext.Current.CancellationToken);
+        var environment = new Dictionary<string, string> { [Captr.Core.Common.FreeSpace.SimulateVariable] = free };
+
+        CliRun start = await RunWithAsync(PublishedPayload.Cli(), ["start"], environment);
+        start.ExitCode.ShouldBe(ExitCodes.Success, start.ToString());
+        await Task.Delay(TimeSpan.FromSeconds(12), TestContext.Current.CancellationToken);
+
+        // The disk "fills": the recorder must notice on its own and stop cleanly.
+        await File.WriteAllTextAsync(free, "1", TestContext.Current.CancellationToken);
+        await EndToEnd.WaitUntilIdleAsync(PublishedPayload.Cli(), DataRoot, TimeSpan.FromMinutes(2));
+
+        CliRun status = await RunWithAsync(PublishedPayload.Cli(), ["status", "--json"], environment);
+        JsonElement outcome = JsonDocument.Parse(status.Stdout).RootElement.GetProperty("lastOutcome");
+        outcome.GetProperty("result").GetString().ShouldBe("failed", "a recording that stopped itself is not a normal stop");
+        outcome.GetProperty("reason").GetString()!.ShouldContain("nearly full");
+        (await RunWithAsync(PublishedPayload.Cli(), ["status"], environment)).Stdout
+            .ShouldContain("stopped on its own", Case.Sensitive, "the plain status says so too");
+
+        string session = Directory.GetDirectories(Work).ShouldHaveSingleItem();
+        Directory.GetFiles(session, "*.mkv").ShouldNotBeEmpty("everything recorded before the stop is kept");
+        (await RunAsync("recordings", "verify", session)).ExitCode.ShouldBe(ExitCodes.Success);
+    }
+
+    [Fact]
     public async Task A_missing_ffmpeg_refuses_to_start_and_says_to_reinstall()
     {
         await ConfigureAsync();

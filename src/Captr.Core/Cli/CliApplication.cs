@@ -218,6 +218,11 @@ public static class CliApplication
 
             string human = status.State switch
             {
+                // The exit code stays 10 (a contract); the words say what the window
+                // says, so a script's log shows why the last recording ended early.
+                "idle" when StatusPresentation.ForDisplay(status, null).State == StatusPresentation.Failed =>
+                    "Idle — nothing is recording. The last recording stopped on its own: " +
+                    StatusPresentation.DescribeFailure(status),
                 "idle" => "Idle — nothing is recording.",
                 "paused" => $"Paused (session {status.SessionId:N}, elapsed {status.Elapsed:hh\\:mm\\:ss}, {coverage}). Don't forget to resume.",
                 _ => $"{status.State} — session {status.SessionId:N}, elapsed {status.Elapsed:hh\\:mm\\:ss}, " +
