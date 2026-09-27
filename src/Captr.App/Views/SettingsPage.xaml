@@ -291,22 +291,29 @@
                     <StackPanel>
                         <TextBlock theme:Typo.Text="Hotkeys" Style="{StaticResource MicroLabel}" Margin="0,0,0,3" />
                         <TextBlock Style="{StaticResource SectionHint}"
-                                   Text="Click a box and press the combination you want. Backspace disables one." />
+                                   Text="Click a box and press the combination you want: Ctrl, Alt or Win with a key, or a function key on its own. Backspace disables one." />
 
                         <UniformGrid Rows="1" Columns="2">
                             <StackPanel Margin="0,0,10,0">
                                 <TextBlock theme:Typo.Text="Start / stop recording" Style="{StaticResource FieldLabel}" />
-                                <views:HotkeyBox Text="{Binding RecordToggleHotkey, UpdateSourceTrigger=PropertyChanged}" />
+                                <views:HotkeyBox Text="{Binding RecordToggleHotkey, UpdateSourceTrigger=PropertyChanged}"
+                                                 AutomationProperties.Name="Start or stop recording hotkey" />
                                 <TextBlock Style="{StaticResource FieldHint}"
                                            Text="One key: starts when idle, stops when recording." />
                             </StackPanel>
                             <StackPanel>
                                 <TextBlock theme:Typo.Text="Pause / resume" Style="{StaticResource FieldLabel}" />
-                                <views:HotkeyBox Text="{Binding PauseToggleHotkey, UpdateSourceTrigger=PropertyChanged}" />
+                                <views:HotkeyBox Text="{Binding PauseToggleHotkey, UpdateSourceTrigger=PropertyChanged}"
+                                                 AutomationProperties.Name="Pause or resume hotkey" />
                                 <TextBlock Style="{StaticResource FieldHint}"
                                            Text="Pauses or resumes. Does nothing when idle." />
                             </StackPanel>
                         </UniformGrid>
+
+                        <!-- Set after each save: which keys another application owns. -->
+                        <TextBlock Text="{Binding HotkeyStatus}" Style="{StaticResource WarningText}" Margin="0,8,0,0"
+                                   TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"
+                                   Visibility="{Binding HotkeyStatus, Converter={StaticResource NonEmptyToVisibility}}" />
                     </StackPanel>
                 </Border>
 

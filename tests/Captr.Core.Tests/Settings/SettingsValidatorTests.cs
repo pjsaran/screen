@@ -270,4 +270,40 @@ public class SettingsValidatorTests
 
         SettingsValidator.Validate(settings).ShouldContain(e => e.Message.Contains("cannot be shorter"));
     }
+
+    [Theory]
+    [InlineData("Ctrl+Alt+Banana", "Ctrl+Alt+F10", "Start/stop recording: ")]
+    [InlineData("Ctrl+Alt+F9", "Shift+P", "Pause/resume: ")]
+    public void A_hotkey_that_cannot_be_used_is_reported_but_never_stops_a_recording(
+        string record, string pause, string prefix)
+    {
+        // Added after release: a settings file with a hotkey typo recorded yesterday,
+        // so it must still record today. It is refused when next edited instead.
+        var settings = Valid with { Hotkeys = new HotkeySettings { RecordToggle = record, PauseToggle = pause } };
+
+        SettingsError error = SettingsValidator.Validate(settings).ShouldHaveSingleItem();
+        error.Field.ShouldBe(nameof(CaptrSettings.Hotkeys));
+        error.Message.ShouldStartWith(prefix);
+        error.BlocksRecording.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Both_toggles_on_the_same_keys_is_named_as_exactly_that()
+    {
+        // It used to reach registration and be reported as "already in use by another
+        // application" - the other application being Captr itself.
+        var settings = Valid with { Hotkeys = new HotkeySettings { RecordToggle = "Ctrl+Alt+F9", PauseToggle = "alt+ctrl+f9" } };
+
+        SettingsError error = SettingsValidator.Validate(settings).ShouldHaveSingleItem();
+        error.Message.ShouldBe("Start/stop and pause/resume can't use the same keys.");
+        error.BlocksRecording.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Disabled_hotkeys_are_valid_and_do_not_clash_with_each_other()
+    {
+        var settings = Valid with { Hotkeys = new HotkeySettings { RecordToggle = "", PauseToggle = "" } };
+
+        SettingsValidator.Validate(settings).ShouldBeEmpty();
+    }
 }

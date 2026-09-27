@@ -115,8 +115,16 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public static IReadOnlyList<QualityLevel> Qualities => QualityLevels.All;
 
-    public SettingsViewModel(HostConnection? host = null)
+    /// <summary>Hotkey problems found when the saved hotkeys were applied - another
+    /// application owns the keys - shown beside the hotkey boxes.</summary>
+    [ObservableProperty]
+    private string _hotkeyStatus = "";
+
+    private readonly Func<HotkeySettings, IReadOnlyList<string>>? _applyHotkeys;
+
+    public SettingsViewModel(HostConnection? host = null, Func<HotkeySettings, IReadOnlyList<string>>? applyHotkeys = null)
     {
+        _applyHotkeys = applyHotkeys;
         _savedTextTimer.Tick += (_, _) =>
         {
             _savedTextTimer.Stop();
@@ -279,6 +287,7 @@ public sealed partial class SettingsViewModel : ObservableObject
                 {
                     SavedText = response.Message;
                     ForgetUnusedSecrets(_settingsBeforeSave, updated);
+                    ApplyHotkeys(updated.Hotkeys);
                 }
                 else
                 {
@@ -312,13 +321,28 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             _store.Save(updated);
             ForgetUnusedSecrets(_settingsBeforeSave, updated);
+            ApplyHotkeys(updated.Hotkeys);
             SavedText = "Saved.";
         }
         catch (SettingsValidationException exception)
         {
             ValidationText = Describe(exception);
         }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            ValidationText = "Could not save the settings: " + exception.Message;
+        }
     }
+
+    /// <summary>
+    /// Registers the saved hotkeys at once. They used to be registered only when the
+    /// window started, so a change made here did nothing until Captr was reopened -
+    /// and nothing said so.
+    /// </summary>
+    private void ApplyHotkeys(HotkeySettings hotkeys) =>
+        HotkeyStatus = _applyHotkeys?.Invoke(hotkeys) is { Count: > 0 } conflicts
+            ? string.Join(Environment.NewLine, conflicts)
+            : "";
 
     private static string Describe(SettingsValidationException exception) =>
         string.Join(Environment.NewLine, exception.Errors.Select(e => $"{e.Field}: {e.Message}"));
@@ -334,12 +358,34 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Back to the defaults - after asking, and through the same save as everything
+    /// else. It used to write the file directly with no confirmation: past the
+    /// recording lock (so a running recording lost its destinations), leaving every
+    /// SharePoint secret orphaned in Credential Manager.
+    /// </summary>
     [RelayCommand]
-    private void Reset()
+    private async Task ResetAsync()
     {
-        _store.Save(CaptrSettings.CreateDefault());
-        Load();
-        SavedText = "Reset to defaults.";
+        int destinations = _store.Load().Destinations.Count;
+        string question = destinations == 0
+            ? "Reset every setting to its default?"
+            : $"Reset every setting to its default and remove all {destinations} destination(s)? " +
+              "Their stored secrets are removed too.";
+        if (System.Windows.MessageBox.Show(question, "Reset settings", System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning, System.Windows.MessageBoxResult.No) != System.Windows.MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        ValidationText = "";
+        SavedText = "";
+        await SaveThroughHostAsync(CaptrSettings.CreateDefault());
+        if (ValidationText.Length == 0)
+        {
+            Load();
+            SavedText = "Reset to defaults.";
+        }
     }
 }
 

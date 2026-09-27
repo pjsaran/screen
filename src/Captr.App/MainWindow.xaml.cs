@@ -47,6 +47,10 @@ public partial class MainWindow : IDisposable
     /// every entry point drives the same commands.</summary>
     public HomeViewModel Home => _home;
 
+    /// <summary>Registers the global hotkeys and returns any conflicts; set by the App
+    /// once the hotkey manager exists, used by the Settings page after a save.</summary>
+    public Func<Core.Settings.HotkeySettings, IReadOnlyList<string>>? ApplyHotkeys { get; set; }
+
     public MainWindow(HostConnection host)
     {
         _host = host;
@@ -58,7 +62,7 @@ public partial class MainWindow : IDisposable
             new HomePage(_home),
             new RecordingsPage(new RecordingsViewModel(host)),
             new TransfersPage(new TransfersViewModel(host)),
-            new SettingsPage(new SettingsViewModel(host)),
+            new SettingsPage(new SettingsViewModel(host, hotkeys => ApplyHotkeys?.Invoke(hotkeys) ?? [])),
             new DiagnosticsPage(new DiagnosticsViewModel()),
             new HelpPage(),
         ];

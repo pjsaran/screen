@@ -39,11 +39,20 @@ public sealed class HotkeyBox : TextBox
     /// <inheritdoc />
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
-        // Handled here, not in OnKeyDown: Tab, arrows, and Alt combinations are
-        // swallowed by focus and menu handling before a normal key handler sees them.
-        e.Handled = true;
-
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+
+        // Tab, Shift+Tab and Escape move on, exactly as everywhere else. Every key used
+        // to be captured here, and a plain Tab cleared the box: a keyboard user was
+        // trapped in the first hotkey box and switched that hotkey off on the way.
+        if (key is Key.Tab or Key.Escape
+            && (Keyboard.Modifiers & ~ModifierKeys.Shift) == ModifierKeys.None)
+        {
+            return;
+        }
+
+        // Handled here, not in OnKeyDown: arrows and Alt combinations are swallowed by
+        // focus and menu handling before a normal key handler sees them.
+        e.Handled = true;
 
         if (key is Key.Back or Key.Delete)
         {
@@ -59,17 +68,22 @@ public sealed class HotkeyBox : TextBox
             return;
         }
 
-        ModifierKeys modifiers = Keyboard.Modifiers;
-        if (modifiers == ModifierKeys.None)
+        // The same rules the settings validator applies (Core's HotkeyCombination):
+        // a function key on its own is fine; anything else needs Ctrl, Alt or Win.
+        // A refused combination leaves the current hotkey as it was and says why - it
+        // used to be wiped, silently switching the hotkey off.
+        string modifiers = DescribeModifiers();
+        string candidate = modifiers.Length == 0 ? key.ToString() : modifiers + "+" + key;
+        if (Core.Interop.HotkeyCombination.DescribeProblem(candidate) is { } problem)
         {
-            SetText("");
-            ToolTip = "A global hotkey needs at least one of Ctrl, Alt, Shift or Win — " +
-                      "otherwise it would fire while you are typing in another application.";
+            ToolTip = problem;
+            System.Windows.Automation.AutomationProperties.SetHelpText(this, problem);
             return;
         }
 
         ToolTip = null;
-        SetText(DescribeModifiers() + "+" + key);
+        System.Windows.Automation.AutomationProperties.SetHelpText(this, "");
+        SetText(candidate);
     }
 
     /// <inheritdoc />

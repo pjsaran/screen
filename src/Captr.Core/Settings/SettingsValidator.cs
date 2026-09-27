@@ -1,4 +1,5 @@
 using Captr.Core.Encoders;
+using Captr.Core.Interop;
 using Captr.Core.Naming;
 
 namespace Captr.Core.Settings;
@@ -68,6 +69,7 @@ public static class SettingsValidator
 
         ValidatePattern(settings.OutputPattern, nameof(CaptrSettings.OutputPattern), errors);
         ValidateRetries(settings.Retries, errors);
+        ValidateHotkeys(settings.Hotkeys, errors);
 
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (DestinationSettings destination in settings.Destinations)
@@ -120,6 +122,45 @@ public static class SettingsValidator
             errors.Add(new(field,
                 $"The longest retry delay ({retries.MaxRetrySeconds}s) cannot be shorter than the first one " +
                 $"({retries.FirstRetrySeconds}s)."));
+        }
+    }
+
+    /// <summary>
+    /// Each hotkey must be a combination Captr can register, must not be something a
+    /// person types in the ordinary course of things, and the two must differ.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// There were no hotkey rules at all. A typo saved through the CLI was accepted and
+    /// surfaced only as a message box the next time the window opened, and two toggles
+    /// set to the same keys were reported as "already in use by another application" —
+    /// the other application being Captr itself.
+    /// </para>
+    /// <para>
+    /// None of these rules blocks a recording (<see cref="SettingsError.BlocksRecording"/>
+    /// is false). They were added after release, a hotkey has nothing to do with whether
+    /// footage can be captured, and a settings file that recorded yesterday must record
+    /// today. The file is refused when it is next EDITED, which is when the person can
+    /// act on the message.
+    /// </para>
+    /// </remarks>
+    private static void ValidateHotkeys(HotkeySettings hotkeys, List<SettingsError> errors)
+    {
+        const string field = nameof(CaptrSettings.Hotkeys);
+
+        if (HotkeyCombination.DescribeProblem(hotkeys.RecordToggle) is { } record)
+        {
+            errors.Add(new(field, "Start/stop recording: " + record) { BlocksRecording = false });
+        }
+
+        if (HotkeyCombination.DescribeProblem(hotkeys.PauseToggle) is { } pause)
+        {
+            errors.Add(new(field, "Pause/resume: " + pause) { BlocksRecording = false });
+        }
+
+        if (HotkeyCombination.AreSame(hotkeys.RecordToggle, hotkeys.PauseToggle))
+        {
+            errors.Add(new(field, "Start/stop and pause/resume can't use the same keys.") { BlocksRecording = false });
         }
     }
 
@@ -201,7 +242,7 @@ public static class SettingsValidator
 public sealed record SettingsError(string Field, string Message)
 {
     /// <summary>Whether this problem stops a recording from starting. Only rules
-    /// added after release set it false (see ValidateFolderPattern); everything else
-    /// blocks, as SPEC §8 asks.</summary>
+    /// added after release set it false (see ValidateFolderPattern and
+    /// ValidateHotkeys); everything else blocks, as SPEC §8 asks.</summary>
     public bool BlocksRecording { get; init; } = true;
 }

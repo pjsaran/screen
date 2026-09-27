@@ -94,16 +94,19 @@ public partial class App : Application
     private void RegisterHotkeys(MainWindow window)
     {
         Core.Settings.CaptrSettings settings = new Core.Settings.SettingsStore().Load();
-        _hotkeys = new HotkeyManager(window);
-        _hotkeys.Register(settings.Hotkeys.RecordToggle, "start/stop recording",
-            () => window.Dispatcher.BeginInvoke(() => _ = window.Home.ToggleRecordingAsync()));
-        _hotkeys.Register(settings.Hotkeys.PauseToggle, "pause/resume recording",
+        _hotkeys = new HotkeyManager(
+            window,
+            () => window.Dispatcher.BeginInvoke(() => _ = window.Home.ToggleRecordingAsync()),
             () => window.Dispatcher.BeginInvoke(() => _ = window.Home.TogglePauseAsync()));
 
-        if (_hotkeys.Conflicts.Count > 0)
+        // The Settings page re-applies them after every save, so a change takes effect
+        // at once instead of at the next launch.
+        window.ApplyHotkeys = _hotkeys.Apply;
+
+        if (_hotkeys.Apply(settings.Hotkeys) is { Count: > 0 } conflicts)
         {
             MessageBox.Show(
-                string.Join(Environment.NewLine, _hotkeys.Conflicts),
+                string.Join(Environment.NewLine, conflicts),
                 "Hotkey conflicts", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
