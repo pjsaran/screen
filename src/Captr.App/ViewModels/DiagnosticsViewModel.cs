@@ -142,14 +142,20 @@ public sealed partial class DiagnosticsViewModel : ObservableObject
                 Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"captr-support-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.zip");
 
-            await SupportBundle.CreateAsync(
-                bundlePath, new SettingsStore().Load().WorkingFolder, LogFolder, CancellationToken.None);
+            CaptrSettings settings = new SettingsStore().Load();
+            SupportBundleContents contents = await SupportBundle.CreateAsync(
+                bundlePath, settings.WorkingFolder, LogFolder, CancellationToken.None, settings);
 
-            Message = $"Support bundle written to {bundlePath}. It contains no video and no secrets.";
+            // Say what is in it, not only what is not: the person is about to send it
+            // to someone else.
+            Message = $"Support bundle saved to {bundlePath}. " + SupportBundle.Summary +
+                      (contents.Unreadable.Count == 0
+                          ? ""
+                          : $" {contents.Unreadable.Count} file(s) could not be read and were left out; README.txt inside lists them.");
         }
-        catch (IOException exception)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            Message = "Could not create the bundle: " + exception.Message;
+            Message = "Could not create the bundle: " + exception.Message + " Check there is space on the Desktop and try again.";
         }
     }
 
