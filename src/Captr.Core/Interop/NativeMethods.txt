@@ -82,3 +82,15 @@ CREDENTIALW
 // working folder failed in it; see Common/FreeSpace.
 GetDiskFreeSpaceEx
 
+// --- Handle-based power requests. SetThreadExecutionState belongs to the calling
+// THREAD, and a recording's async code runs on whichever pool thread is free; a power
+// request belongs to its handle. See WindowsEvents/ExecutionStateHolder.
+PowerCreateRequest
+PowerSetRequest
+PowerClearRequest
+REASON_CONTEXT
+POWER_REQUEST_CONTEXT_FLAGS
+POWER_REQUEST_CONTEXT_VERSION
+// Read-only: lets the tests observe the machine's real execution state.
+CallNtPowerInformation
+
