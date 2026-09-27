@@ -13,7 +13,8 @@ working folder. Everything on this page is optional.
 Two kinds work today:
 
 - **Local or network folder** — a folder on this PC, a mapped drive, or a UNC
-  share like `\\server\share\recordings`.
+  share like `\\server\share\recordings`. The folder must be a full path; see
+  [what a destination folder may be](naming-patterns.md#what-a-destination-folder-may-be).
 - **SharePoint** — a document library, uploaded through Microsoft Graph. Needs a
   one-time [app registration](sharepoint-setup.md).
 
@@ -31,7 +32,12 @@ Each destination has:
 | **File name at this destination** | Optional. Leave it empty to keep the recording's own name; fill it in when an archive wants a different convention from your working copy. |
 | **Enabled** | Unticked destinations are skipped. Useful for turning one off without losing its configuration. |
 
-Saving the destination saves it — there is no second Save to remember.
+Saving the destination saves it — there is no second Save to remember. While you
+type, the editor shows where a recording made now would land and what it would be
+called, or what is wrong with the pattern.
+
+For SharePoint, **Test connection** signs in with the secret you have just typed, so
+a pass proves that secret works, not one remembered from earlier.
 
 ## How a transfer works
 
@@ -41,22 +47,32 @@ unaffected, and retrying the failed one cannot disturb the successful one.
 
 For a folder destination, Captr:
 
-1. checks there is enough free space;
-2. copies to a temporary `.partial` file, so an interrupted copy never leaves
-   something that looks finished;
-3. reads the copy back and compares its size and SHA-256 against the source —
-   this is what catches a network filesystem that lied about writing;
+1. checks there is enough free space — measured for the folder itself, so a UNC
+   share or a volume mounted into a folder is measured correctly;
+2. copies to a temporary `.partial` file with a name of its own, so an interrupted
+   copy never leaves something that looks finished and never overwrites a file
+   already there, even one with the same temporary name;
+3. flushes the copy to disk, reads it back, and compares its size and SHA-256
+   against the source — this is what catches a network filesystem that lied about
+   writing;
 4. renames it into place, adding ` (2)` if something is already there. **Captr
-   never overwrites a file at a destination.**
+   never overwrites a file at a destination.** A copy that fails is deleted, never
+   left half-written.
 
 For SharePoint it uses a resumable upload session, recording the confirmed position
-after every chunk, so a dropped connection resumes rather than starting again.
+after every chunk, so a dropped connection resumes rather than starting again. An
+upload session that SharePoint has expired in the meantime is replaced by a new one
+— after first checking whether the file already arrived, so a lost final reply
+never uploads a second copy. Uploads go only to `https` addresses. A finished upload
+is checked by its size.
 
 The queue survives reboots. A transfer interrupted by a shutdown carries on when
 Captr next runs.
 
 **A failed transfer can never harm the local recording.** The worst thing that can
-happen is a line on the Transfers page waiting for you.
+happen is a line on the Transfers page waiting for you — and when a transfer needs
+you, Home says so too ("1 transfer needs attention — see Transfers"), so you do not
+have to open the Transfers page to find out.
 
 ## The Transfers page
 
@@ -80,6 +96,22 @@ that does nothing is worse than no button.
 
 **Retry all failed** re-queues everything needing attention in one click, for after
 you have fixed whatever was wrong.
+
+If Retry or Stop fails, the error stays in a banner at the top of the page until an
+action succeeds. The list refreshes every few seconds without rebuilding itself, so
+keyboard focus and a screen reader's place stay where they were. If Captr's transfer
+database cannot be opened, the page says so in words instead of the window failing
+to open.
+
+### When SharePoint says no
+
+| What happened | State | What to do |
+|---|---|---|
+| Microsoft sign-in refused the client secret (mistyped, expired, or deleted in Entra) | **SIGN-IN NEEDED** | Enter the current secret in the destination and save; the transfer goes back in the queue by itself. Nothing was sent. |
+| SharePoint rejected the access token | **SIGN-IN NEEDED** | The same. |
+| The app has no permission on that site (with `Sites.Selected`, the site was never granted) | **REFUSED**, with SharePoint's own reason underneath | Ask the SharePoint administrator to grant the app access to the site ([SharePoint setup](sharepoint-setup.md)), then Retry. Every automatic retry would be refused the same way, so none is made. |
+
+In every case the local recording is untouched.
 
 ### How far back the list goes
 The page shows **finished transfers from the last 30 days**. Anything still going —
@@ -107,6 +139,14 @@ Running out of attempts loses nothing. The transfer parks with its last error an
 Retry button; the local recording is untouched. If the destination is simply down
 for the weekend, press Retry on Monday.
 
+For SharePoint, an answer that means "try again later" — a timeout (HTTP 408), a
+locked file (423), throttling (429), or a server error (5xx) — counts as a
+temporary failure, and when SharePoint says how long to wait (`Retry-After`, as
+seconds or as a time), that wait is honoured. An error Captr did not expect is still classified
+rather than stopping the queue: a credential problem waits for sign-in, access
+denied or a bad path waits for a person, and anything else is retried within the
+attempt limit.
+
 The Transfers page states the policy in words at the top, so "attempt 3 of 5" always
 means something.
 
@@ -129,6 +169,30 @@ It is offered only when it would actually do something: at least one enabled
 destination must be missing this recording. When every destination already has it,
 the menu item is greyed out and says so — pressing it would only produce a second
 copy called "name (2)".
+
+It never queues a duplicate. For each enabled destination:
+
+- already transferred — skipped;
+- already on its way (queued or sending) — left alone, so pressing it twice sends
+  one copy, not two;
+- stopped, given up, refused, or waiting for sign-in — **that** transfer is put back
+  in the queue, rather than a second one added beside it;
+- never sent — a new transfer is queued.
+
+Only the recording's own finished files are sent — names that point outside the
+recording's folder are ignored (and reported by `captr recordings verify` as
+tampering).
+
+## Retention and transfers
+
+Captr deletes a recording's folder by itself only after the retention period, and
+only once it has been transferred and **every one of that recording's own transfers
+has completed** — see [Retention](recording.md#retention). A transfer that is stuck,
+stopped, or waiting for sign-in keeps the recording on this PC, so bringing it back
+with Retry or Send again is what eventually lets retention reclaim the space.
+Recordings are judged by their own transfers only: a folder whose name happens to
+begin with another's (`S1` and `S10`) is never deleted on the strength of the other
+one's transfers.
 
 The command-line equivalent is `captr recordings resend <folder>`.
 
