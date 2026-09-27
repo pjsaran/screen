@@ -70,13 +70,28 @@ public sealed class SettingsStore
 
     /// <summary>
     /// Loads settings, migrating an older schema forward. Returns defaults when the
-    /// file does not exist. A corrupt file is set aside as <c>.corrupt</c> and
-    /// defaults are returned. A file written by a NEWER Captr throws
-    /// <see cref="SettingsMigrationException"/> — silently dropping the newer
-    /// version's fields would destroy configuration on the next save.
+    /// file does not exist. Never throws for anything a FILE can contain — the host
+    /// calls this before it can answer anyone, and the window before it can show
+    /// anything, so a throw here used to mean no recording and no window at all.
     /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>A file that is not valid JSON, or is JSON of the wrong shape (a string
+    /// where a number belongs, an unknown destination kind), is kept as
+    /// <c>.corrupt</c> and the previous version or the defaults are used.</item>
+    /// <item>A file written by a NEWER Captr (after a downgrade) is copied, untouched,
+    /// to <c>settings.json.from-schema-N</c> — a name no save ever writes — and the
+    /// defaults are used, as the installer's downgrade warning says they will be.
+    /// Its fields are never silently dropped: upgrading again and restoring that copy
+    /// gets every one of them back.</item>
+    /// <item>Explicit <c>null</c>s become the defaults they stand for, instead of
+    /// null references somewhere later.</item>
+    /// </list>
+    /// Whenever any of this happens <see cref="LoadProblem"/> says what and why.
+    /// </remarks>
     public CaptrSettings Load()
     {
+        LoadProblem = null;
         AdoptSettingsLeftInRoamingByAnOlderCaptr();
 
         string? json = AtomicFile.ReadOrNull(_settingsPath);
@@ -91,25 +106,90 @@ public sealed class SettingsStore
                 ?? CaptrSettings.CreateDefault();
         }
 
-        JsonObject document;
         try
         {
-            document = JsonNode.Parse(json) as JsonObject
+            JsonObject document = JsonNode.Parse(json) as JsonObject
                 ?? throw new JsonException("Settings root is not a JSON object.");
+
+            int? newerVersion = NewerSchemaVersion(document);
+            if (newerVersion is { } version)
+            {
+                string keptAs = $"{_settingsPath}.from-schema-{version.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                if (!File.Exists(keptAs))
+                {
+                    File.Copy(_settingsPath, keptAs);
+                }
+
+                LoadProblem =
+                    $"settings.json was written by a newer version of Captr (settings version {version}; this one " +
+                    $"understands up to {CaptrSettings.CurrentSchemaVersion}), so Captr is using default settings. " +
+                    $"Your settings are kept, untouched, in {keptAs} — install the newer Captr again to use them.";
+                return CaptrSettings.CreateDefault();
+            }
+
+            document = _migrator.MigrateToCurrent(document);
+            CaptrSettings settings = document.Deserialize<CaptrSettings>(SerializerOptions)
+                ?? throw new JsonException("Settings deserialised to nothing.");
+            return WithDefaultsForNulls(settings);
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException
+                                              or NotSupportedException or ArgumentException)
         {
             // Keep the unreadable file for inspection, then try the previous version
             // for the same reason as above.
             File.Copy(_settingsPath, _settingsPath + ".corrupt", overwrite: true);
-            return RecoverFromPreviousVersion("the settings file could not be parsed")
-                ?? CaptrSettings.CreateDefault();
+            CaptrSettings? recovered = RecoverFromPreviousVersion("the settings file could not be parsed");
+            LoadProblem =
+                $"settings.json could not be read ({exception.Message}). It was kept as settings.json.corrupt and " +
+                (recovered is null ? "Captr is using default settings." : "the previous version of your settings was restored.");
+            return recovered ?? CaptrSettings.CreateDefault();
         }
+    }
 
-        document = _migrator.MigrateToCurrent(document);
+    /// <summary>
+    /// Set when <see cref="Load"/> could not use the file as it stood, saying what it
+    /// did instead and where the original went. Null on a normal load. Shown by
+    /// Diagnostics, <c>captr doctor</c>, and the Settings page.
+    /// </summary>
+    public string? LoadProblem { get; private set; }
 
-        CaptrSettings? settings = document.Deserialize<CaptrSettings>(SerializerOptions);
-        return settings ?? CaptrSettings.CreateDefault();
+    private static int? NewerSchemaVersion(JsonObject document)
+    {
+        // Read leniently: a malformed version is a corrupt file, handled by the caller.
+        int version = document["schemaVersion"]?.GetValue<int>() ?? 1;
+        return version > CaptrSettings.CurrentSchemaVersion ? version : null;
+    }
+
+    /// <summary>
+    /// System.Text.Json honours an explicit <c>null</c> even for members declared
+    /// non-nullable, so <c>"destinations": null</c> used to load "successfully" and
+    /// fail with a null reference wherever the list was first used.
+    /// </summary>
+    private static CaptrSettings WithDefaultsForNulls(CaptrSettings settings)
+    {
+        CaptrSettings defaults = CaptrSettings.CreateDefault();
+
+        // The '??' operands look redundant to the compiler, which believes the
+        // declared non-nullability; the file is under no such obligation.
+#pragma warning disable IDE0029, IDE0270
+        return settings with
+        {
+            ExcludedDisplayIds = settings.ExcludedDisplayIds?.Where(id => id is not null).ToArray() ?? [],
+            Destinations = settings.Destinations?.Where(d => d is not null).ToArray() ?? [],
+            Retries = settings.Retries ?? defaults.Retries,
+            Hotkeys = settings.Hotkeys is null
+                ? defaults.Hotkeys
+                : new HotkeySettings
+                {
+                    RecordToggle = settings.Hotkeys.RecordToggle ?? defaults.Hotkeys.RecordToggle,
+                    PauseToggle = settings.Hotkeys.PauseToggle ?? defaults.Hotkeys.PauseToggle,
+                },
+            WorkingFolder = settings.WorkingFolder ?? defaults.WorkingFolder,
+            OutputPattern = settings.OutputPattern ?? defaults.OutputPattern,
+            Quality = settings.Quality ?? defaults.Quality,
+            SpeedPreset = settings.SpeedPreset ?? defaults.SpeedPreset,
+        };
+#pragma warning restore IDE0029, IDE0270
     }
 
     /// <summary>
@@ -144,9 +224,12 @@ public sealed class SettingsStore
 
             AtomicFile.Write(_settingsPath, backup);
             RecoveredFromPreviousVersion = reason;
-            return recovered;
+            LoadProblem = $"Captr restored the previous version of your settings because {reason}.";
+            return WithDefaultsForNulls(recovered);
         }
-        catch (Exception exception) when (exception is JsonException or IOException or NotSupportedException)
+        catch (Exception exception) when (exception is JsonException or IOException or NotSupportedException
+                                              or InvalidOperationException or FormatException or ArgumentException
+                                              or SettingsMigrationException)
         {
             // A backup that will not load is no better than no backup; defaults are
             // valid and safe, and the .bak file stays on disk either way.

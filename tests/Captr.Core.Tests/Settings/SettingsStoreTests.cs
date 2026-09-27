@@ -222,14 +222,76 @@ public class SettingsStoreTests : IDisposable
     }
 
     [Fact]
-    public void A_file_from_a_newer_captr_refuses_to_load_rather_than_dropping_fields()
+    public void A_file_from_a_newer_captr_is_kept_intact_and_defaults_are_used_with_the_reason_reported()
+    {
+        // After a downgrade (/ALLOWDOWNGRADE), the file was written by a Captr that
+        // knows fields this one does not. Throwing here used to stop the recording
+        // host and the window from starting at all. The installer's own warning
+        // promises what happens instead: Captr starts from defaults. The newer file
+        // must survive untouched — including any later save — so upgrading again
+        // gets everything back.
+        SettingsStore store = MakeStore();
+        Directory.CreateDirectory(Path.GetDirectoryName(store.SettingsPath)!);
+        string newer = $$"""{"schemaVersion": {{CaptrSettings.CurrentSchemaVersion + 1}}, "futureField": 42 }""";
+        File.WriteAllText(store.SettingsPath, newer);
+
+        CaptrSettings loaded = store.Load();
+
+        loaded.ShouldBe(CaptrSettings.CreateDefault());
+        store.LoadProblem.ShouldNotBeNull();
+        store.LoadProblem.ShouldContain("newer");
+        string kept = store.SettingsPath + $".from-schema-{CaptrSettings.CurrentSchemaVersion + 1}";
+        File.ReadAllText(kept).ShouldBe(newer);
+
+        store.Save(loaded with { FrameRate = 10 });
+        File.ReadAllText(kept).ShouldBe(newer, "the newer version's copy is never overwritten");
+    }
+
+    [Theory]
+    [InlineData("""{"schemaVersion": 3, "framerate": "fast"}""")]
+    [InlineData("""{"schemaVersion": 3, "destinations": [{"name": "x", "kind": "ftp"}]}""")]
+    [InlineData("""{"schemaVersion": "3"}""")]
+    [InlineData("""{"schemaVersion": 3, "retries": [1, 2]}""")]
+    public void A_file_that_is_json_but_not_settings_is_treated_as_corrupt_rather_than_crashing(string json)
+    {
+        // Only JSON syntax errors used to be caught. A wrong type, an unknown enum
+        // member, or a string where a number belongs escaped Load() — which the host
+        // calls before it opens its pipe, so every start then timed out after a
+        // minute, and the window crashed before it appeared.
+        SettingsStore store = MakeStore();
+        Directory.CreateDirectory(Path.GetDirectoryName(store.SettingsPath)!);
+        File.WriteAllText(store.SettingsPath, json);
+
+        CaptrSettings loaded = Should.NotThrow(store.Load);
+
+        loaded.SchemaVersion.ShouldBe(CaptrSettings.CurrentSchemaVersion);
+        File.ReadAllText(store.SettingsPath + ".corrupt").ShouldBe(json);
+        store.LoadProblem.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void Nulls_in_the_file_become_defaults_instead_of_null_references_later()
     {
         SettingsStore store = MakeStore();
         Directory.CreateDirectory(Path.GetDirectoryName(store.SettingsPath)!);
-        File.WriteAllText(store.SettingsPath, $$"""{"schemaVersion": {{CaptrSettings.CurrentSchemaVersion + 1}} }""");
+        File.WriteAllText(store.SettingsPath, $$"""
+            {"schemaVersion": {{CaptrSettings.CurrentSchemaVersion}}, "destinations": null, "hotkeys": null,
+             "retries": null, "excludedDisplayIds": null, "workingFolder": null, "outputPattern": null,
+             "quality": null, "preset": null}
+            """);
 
-        Should.Throw<SettingsMigrationException>(() => store.Load())
-            .Message.ShouldContain("newer");
+        CaptrSettings loaded = store.Load();
+
+        CaptrSettings defaults = CaptrSettings.CreateDefault();
+        loaded.Destinations.ShouldBeEmpty();
+        loaded.ExcludedDisplayIds.ShouldBeEmpty();
+        loaded.Hotkeys.ShouldBe(defaults.Hotkeys);
+        loaded.Retries.ShouldBe(defaults.Retries);
+        loaded.WorkingFolder.ShouldBe(defaults.WorkingFolder);
+        loaded.OutputPattern.ShouldBe(defaults.OutputPattern);
+        loaded.Quality.ShouldBe(defaults.Quality);
+        loaded.SpeedPreset.ShouldBe(defaults.SpeedPreset);
+        SettingsValidator.Validate(loaded).ShouldBeEmpty();
     }
 
     // SPEC §14: "schema migration from prior-version fixtures". The chain machinery is

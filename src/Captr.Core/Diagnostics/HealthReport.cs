@@ -94,14 +94,27 @@ public static class HealthReport
 
             // A silent recovery is worse than a loud one: the user needs to know
             // something happened to their settings, even though they got them back.
-            if (store.RecoveredFromPreviousVersion is { } reason)
+            if (store.LoadProblem is { } problem)
             {
                 checks.Add(new(
                     "Settings",
                     HealthLevel.Attention,
-                    $"Recovered from the previous saved version because {reason}.",
-                    "Your settings are back, but check them over — anything changed since the last save is gone. " +
-                    $"The damaged file, if there was one, is kept beside {path} as .corrupt."));
+                    problem,
+                    "Open Settings and check them over — anything changed since the last save may be gone — then save."));
+                return settings;
+            }
+
+            // Load never validates (a file must always load, or nothing starts), so
+            // the check has to: a file edited by hand, or by `settings import` from a
+            // newer version's export, can hold values the recorder will refuse.
+            IReadOnlyList<SettingsError> errors = SettingsValidator.Validate(settings);
+            if (errors.Count > 0)
+            {
+                checks.Add(new(
+                    "Settings",
+                    HealthLevel.Problem,
+                    "The settings file has problems: " + string.Join("; ", errors.Select(e => $"{e.Field} — {e.Message}")),
+                    "Open Settings, fix what is listed, and save. Recording refuses to start while settings are invalid."));
                 return settings;
             }
 
@@ -111,15 +124,6 @@ public static class HealthReport
                 File.Exists(path) ? $"Loaded from {path}." : "Using defaults; nothing has been saved yet.",
                 null));
             return settings;
-        }
-        catch (SettingsValidationException exception)
-        {
-            checks.Add(new(
-                "Settings",
-                HealthLevel.Problem,
-                "The settings file has problems: " +
-                string.Join("; ", exception.Errors.Select(e => $"{e.Field} — {e.Message}")),
-                "Open Settings, fix what is listed, and save. Recording refuses to start while settings are invalid."));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -394,9 +398,11 @@ public static class HealthReport
         string folder = settings.WorkingFolder;
         try
         {
-            Directory.CreateDirectory(folder);
-            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(folder))!);
-            long free = drive.AvailableFreeSpace;
+            // Measured without creating anything: Diagnostics must never alter what
+            // it is diagnosing, and a folder that does not exist yet is not a fault —
+            // the first recording creates it.
+            long free = FreeSpace.AvailableBytes(folder)
+                ?? throw new IOException($"The free space at {folder} could not be measured.");
 
             // Turn free bytes into the only unit that means anything here: how long
             // you could keep recording. Falls back to the measured rate when there is
@@ -414,7 +420,7 @@ public static class HealthReport
             checks.Add(new(
                 "Disk space",
                 level,
-                $"{ByteSize.Format(free)} free on {drive.Name} — roughly {hours:F1} hours of recording.",
+                $"{ByteSize.Format(free)} free at {folder} — roughly {hours:F1} hours of recording.",
                 level == HealthLevel.Ok
                     ? null
                     : "Free some space, choose a working folder on a bigger drive, or lower the frame rate or " +
