@@ -82,8 +82,12 @@ compares the result with the committed `build/licenses/THIRD-PARTY.md`. **Adding
 package means regenerating and committing that report**, which is the point: a
 licence change cannot slip in unnoticed.
 
-FFmpeg is an **LGPL** build, shipped as a separate child process and never linked.
-See [ffmpeg-source-offer.md](../ffmpeg-source-offer.md) for the obligations that
+The pinned FFmpeg is the **GPL** build (it carries libx264), shipped as a separate
+child process and never linked. That is a recorded decision for an internal-only
+deployment, not an oversight — see
+[design decisions](design-decisions.md) — and the LGPL build of the same tag is the
+way back if Captr is ever distributed outside the organisation. See
+[ffmpeg-source-offer.md](../ffmpeg-source-offer.md) for the obligations that
 carries and [Upgrading FFmpeg](upgrading-ffmpeg.md) for moving it forward.
 
 ### Formatting, UTF-8, and CRLF

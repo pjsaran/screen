@@ -19,7 +19,7 @@ produced by a single command".
       committed, no disallowed licence, transitive included). Add `-Full` to
       include the Display, Gpu, and Soak categories on a machine with a real
       desktop and GPU.
-- [x] `build/fetch-ffmpeg.ps1`: pinned LGPL FFmpeg checksum-verified; `ddagrab`
+- [x] `build/fetch-ffmpeg.ps1`: pinned GPL FFmpeg checksum-verified; `ddagrab`
       and hardware encoders asserted; libopenh264 presence recorded.
 - [x] `build/make-installer.ps1`: installer built from pinned Inno Setup,
       checksums + `release.json` emitted.

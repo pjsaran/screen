@@ -56,8 +56,9 @@ plants a secret and greps the support bundle for it.
 
 **Licensing is mechanical, not remembered.** `build/check-licenses.ps1` fails the
 build on a package licence that is not on the allow-list, and the committed
-third-party report must match reality. FFmpeg is an LGPL build, shipped as a child
-process and never linked.
+third-party report must match reality. FFmpeg is the GPL build — deliberately, for an
+internal-only deployment (see [design decisions](design-decisions.md)) — shipped as
+a child process and never linked.
 
 **Every folder explains itself.** Each folder under `src/` has a `README.md` saying
 what it owns and where to start reading. Every public type carries a comment saying
