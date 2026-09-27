@@ -22,11 +22,12 @@ internal static class EndToEnd
 {
     public static async Task<CliRun> RunCliAsync(
         string cli, IEnumerable<string> arguments, string? dataRoot, string? stdin = null,
-        IDictionary<string, string>? environment = null, TimeSpan? timeout = null)
+        IDictionary<string, string>? environment = null, TimeSpan? timeout = null, string? workingDirectory = null)
     {
         var startInfo = new ProcessStartInfo(cli)
         {
             UseShellExecute = false,
+            WorkingDirectory = workingDirectory ?? "",
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

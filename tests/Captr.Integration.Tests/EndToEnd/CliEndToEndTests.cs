@@ -109,6 +109,42 @@ public sealed class CliEndToEndTests : IDisposable
     }
 
     [Fact]
+    public async Task Resend_takes_a_relative_path_relative_to_where_it_is_typed()
+    {
+        // The recorder runs in its own directory; a relative path used to be looked up
+        // THERE and answered "No integrity record" for a perfectly good recording.
+        string parent = Directory.CreateDirectory(Path.Combine(_root, "here")).FullName;
+        string recording = Directory.CreateDirectory(Path.Combine(parent, "rec1")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(recording, "out.mkv"), "footage", TestContext.Current.CancellationToken);
+        new Captr.Core.Sessions.IntegrityRecord
+        {
+            SessionId = Guid.NewGuid(),
+            FinalizedUtc = DateTimeOffset.UtcNow,
+            Segments = [],
+            Outputs = [new Captr.Core.Sessions.HashedFile("out.mkv", 7, "00")],
+            Coverage = new Captr.Core.Sessions.CoverageReport(Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, TimeSpan.Zero, TimeSpan.Zero, []),
+            RepairedSegments = 0,
+            Notes = [],
+        }.Write(recording);
+
+        CliRun run = await EndToEnd.RunCliAsync(PublishedPayload.Cli(), ["recordings", "resend", "rec1"], DataRoot, workingDirectory: parent);
+
+        (run.Stdout + run.Stderr).ShouldNotContain("No integrity record", Case.Insensitive, run.ToString());
+    }
+
+    [Fact]
+    public async Task A_piped_secret_longer_than_any_secret_is_refused_and_nothing_is_stored()
+    {
+        string name = "captr-e2e-" + Guid.NewGuid().ToString("N")[..8];
+
+        CliRun set = await EndToEnd.RunCliAsync(PublishedPayload.Cli(), ["auth", "set-secret", name], DataRoot, stdin: new string('x', 10_000));
+
+        set.ExitCode.ShouldBe(ExitCodes.Error, set.ToString());
+        set.Stderr.ShouldContain("longer than");
+        (await RunAsync("auth", "status", name)).ExitCode.ShouldBe(ExitCodes.Error, "nothing was stored");
+    }
+
+    [Fact]
     public async Task Recover_with_nothing_to_recover_exits_0()
     {
         CliRun run = await RunAsync("recover", "--json");

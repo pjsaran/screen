@@ -290,7 +290,9 @@ public static class CliApplication
             return await WithHostAsync(startHostIfNeeded: true, json, async client =>
             {
                 ResendResponse response = await client.RequestAsync<ResendResponse>(
-                    IpcKinds.Resend, new ResendRequest(parseResult.GetValue(resendFolder)!), cancellationToken);
+                    // Resolved HERE: the recorder runs in its own directory, so a relative
+                    // path used to be looked up there and reported "no integrity record".
+                    IpcKinds.Resend, new ResendRequest(Path.GetFullPath(parseResult.GetValue(resendFolder)!)), cancellationToken);
                 Emit(json, response, response.Message);
                 return response.Queued > 0 ? ExitCodes.Success : ExitCodes.Error;
             }, cancellationToken);
@@ -626,9 +628,17 @@ public static class CliApplication
         set.SetAction(async (parseResult, cancellationToken) =>
         {
             string name = parseResult.GetValue(nameArgument)!;
-            byte[] secret = Console.IsInputRedirected
-                ? System.Text.Encoding.UTF8.GetBytes((await Console.In.ReadToEndAsync(cancellationToken)).TrimEnd('\r', '\n'))
+            byte[]? secret = Console.IsInputRedirected
+                ? await ReadPipedSecretAsync(cancellationToken)
                 : ReadMasked($"Secret for '{name}': ");
+            if (secret is null)
+            {
+                await Console.Error.WriteLineAsync(
+                    $"The secret is longer than {MaxSecretChars} characters, which no client secret is; nothing stored. " +
+                    "Check what is being piped in.");
+                return ExitCodes.Error;
+            }
+
             if (secret.Length == 0)
             {
                 await Console.Error.WriteLineAsync("No secret provided; nothing stored.");
@@ -669,33 +679,104 @@ public static class CliApplication
         return command;
     }
 
-    /// <summary>Masked interactive secret entry — characters echo as '*'.</summary>
+    /// <summary>Longer than any client secret or certificate password; anything
+    /// beyond it is a mistake in what was piped in, not a secret.</summary>
+    private const int MaxSecretChars = 4096;
+
+    /// <summary>
+    /// Masked interactive secret entry — characters echo as '*'.
+    /// </summary>
+    /// <remarks>
+    /// Characters are kept as characters and encoded once, at the end: each key used
+    /// to be UTF-8-encoded on its own, so a character outside the Basic Multilingual
+    /// Plane (two UTF-16 halves) became two replacement characters, and Backspace
+    /// removed one BYTE of a multi-byte character. The buffer is wiped after use.
+    /// With no console to read keys from (a scheduled task without piped input) this
+    /// says so instead of failing with an unhandled exception.
+    /// </remarks>
     private static byte[] ReadMasked(string prompt)
     {
-        Console.Write(prompt);
-        var buffer = new List<byte>();
-        while (true)
+        char[] buffer = new char[MaxSecretChars];
+        int length = 0;
+        try
         {
-            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.Enter)
+            Console.Write(prompt);
+            while (true)
             {
-                Console.WriteLine();
-                return [.. buffer];
-            }
-
-            if (key.Key == ConsoleKey.Backspace)
-            {
-                if (buffer.Count > 0)
+                ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+                if (key.Key == ConsoleKey.Enter)
                 {
-                    buffer.RemoveAt(buffer.Count - 1);
-                    Console.Write("\b \b");
+                    Console.WriteLine();
+                    return System.Text.Encoding.UTF8.GetBytes(buffer, 0, length);
                 }
 
-                continue;
+                if (key.Key == ConsoleKey.Backspace)
+                {
+                    if (length > 0)
+                    {
+                        // A surrogate pair is one character to the person typing.
+                        length -= length > 1 && char.IsLowSurrogate(buffer[length - 1]) && char.IsHighSurrogate(buffer[length - 2]) ? 2 : 1;
+                        Console.Write("\b \b");
+                    }
+
+                    continue;
+                }
+
+                if (key.KeyChar == '\0' || length == buffer.Length)
+                {
+                    continue;
+                }
+
+                buffer[length++] = key.KeyChar;
+                if (!char.IsHighSurrogate(key.KeyChar))
+                {
+                    Console.Write('*');
+                }
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("There is no console to type a secret into. Pipe it in instead, for example: " +
+                                    "Get-Content secret.txt | captr auth set-secret <name>");
+            return [];
+        }
+        finally
+        {
+            Array.Clear(buffer);
+        }
+    }
+
+    /// <summary>A piped secret, read up to <see cref="MaxSecretChars"/> (null when
+    /// longer), without the trailing newline, the character buffer wiped after.</summary>
+    private static async Task<byte[]?> ReadPipedSecretAsync(CancellationToken cancellationToken)
+    {
+        char[] buffer = new char[MaxSecretChars + 1];
+        try
+        {
+            int length = 0;
+            int read;
+            while (length < buffer.Length
+                   && (read = await Console.In.ReadAsync(buffer.AsMemory(length), cancellationToken)) > 0)
+            {
+                length += read;
             }
 
-            buffer.AddRange(System.Text.Encoding.UTF8.GetBytes([key.KeyChar]));
-            Console.Write('*');
+            if (length > MaxSecretChars)
+            {
+                return null;
+            }
+
+            while (length > 0 && buffer[length - 1] is '\r' or '\n')
+            {
+                length--;
+            }
+
+            return System.Text.Encoding.UTF8.GetBytes(buffer, 0, length);
+        }
+        finally
+        {
+            Array.Clear(buffer);
         }
     }
 

@@ -123,6 +123,14 @@ public sealed class IpcClient : IAsyncDisposable
         return client;
     }
 
+    /// <summary>How long one request may take before the recorder counts as stuck.</summary>
+    internal static TimeSpan TimeoutFor(string kind) => kind switch
+    {
+        IpcKinds.Recover => TimeSpan.FromHours(1),
+        IpcKinds.Start or IpcKinds.Stop => TimeSpan.FromMinutes(10),
+        _ => TimeSpan.FromMinutes(2),
+    };
+
     /// <summary>The recorder went away, or answered nonsense, part-way through.</summary>
     private const string LostContact =
         "Captr lost contact with its recorder part-way through. Try again; any recording in progress is not " +
@@ -194,10 +202,28 @@ public sealed class IpcClient : IAsyncDisposable
     public async Task<TResponse> RequestAsync<TResponse>(
         string kind, object? payload, CancellationToken cancellationToken)
     {
-        await IpcProtocol.WriteAsync(_pipe, IpcProtocol.Envelope(kind, payload), cancellationToken).ConfigureAwait(false);
+        // Bounded: with no limit, a recorder that stopped answering hung 'captr start'
+        // for ever - and a scheduled task set to "do not start a new instance" then
+        // never fired again. Generous, because a first start proves an encoder and
+        // waits for any crash recovery, and a recover finalises whole recordings.
+        TimeSpan limit = TimeoutFor(kind);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(limit);
 
-        IpcEnvelope reply = await IpcProtocol.ReadAsync(_pipe, cancellationToken).ConfigureAwait(false)
-            ?? throw new HostUnreachableException(LostContact);
+        IpcEnvelope? answer;
+        try
+        {
+            await IpcProtocol.WriteAsync(_pipe, IpcProtocol.Envelope(kind, payload), timeout.Token).ConfigureAwait(false);
+            answer = await IpcProtocol.ReadAsync(_pipe, timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new HostUnreachableException(
+                $"Captr's recorder did not answer '{kind}' within {limit.TotalMinutes:F0} minutes. It may still be " +
+                "working: check with 'captr status'. If it stays stuck, open Diagnostics and export a support bundle.");
+        }
+
+        IpcEnvelope reply = answer ?? throw new HostUnreachableException(LostContact);
 
         if (reply.Kind == IpcKinds.Error)
         {
