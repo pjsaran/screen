@@ -296,8 +296,8 @@ enough that "is this the file that was made?" is a question someone will ask.
 **Diagnostics → Export support bundle** writes `captr-support-<date>-<time>.zip` to
 your Desktop. It contains:
 
-- the logs — the window's and the recorder's, **including the one being written
-  right now**, crash reports, and `cli-last-error.txt` if there is one;
+- the recorder's logs, **including the one being written right now**, and every
+  crash report;
 - for every recording in the working folder: its journal, integrity record,
   heartbeat, FFmpeg's own report and progress files;
 - basic system information (Windows version, processor count, Captr and .NET
