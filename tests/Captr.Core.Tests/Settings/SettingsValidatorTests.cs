@@ -27,6 +27,32 @@ public class SettingsValidatorTests
         errors.Any(e => e.Field == nameof(CaptrSettings.RetentionDays)).ShouldBe(!accepted);
     }
 
+    [Fact]
+    public void A_relative_destination_folder_is_refused_but_an_existing_one_never_stops_a_recording()
+    {
+        // Settings saved before the full-path rule existed must keep recording after
+        // an upgrade; the problem is reported, and the transfer fails with the reason.
+        CaptrSettings settings = Valid with
+        {
+            Destinations = [new DestinationSettings { Name = "nas", Kind = DestinationKind.Folder, FolderPath = "recordings" }],
+        };
+
+        SettingsError error = SettingsValidator.Validate(settings).ShouldHaveSingleItem();
+        error.Message.ShouldContain("full path");
+        error.BlocksRecording.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void A_broken_token_in_a_destination_folder_still_blocks_as_it_always_did()
+    {
+        CaptrSettings settings = Valid with
+        {
+            Destinations = [new DestinationSettings { Name = "nas", Kind = DestinationKind.Folder, FolderPath = @"D:\{whoops}" }],
+        };
+
+        SettingsValidator.Validate(settings).ShouldHaveSingleItem().BlocksRecording.ShouldBeTrue();
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-5)]

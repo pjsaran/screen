@@ -43,12 +43,26 @@ public static partial class OutputNamer
     /// Windows device names that are invalid as file names regardless of extension
     /// ("CON.mkv" is still the console). Checked case-insensitively against the stem.
     /// </summary>
+    /// <remarks>
+    /// The list Windows itself uses: COM0/LPT0 and the superscript-digit ports
+    /// (COM¹ and friends) are devices too, as are CONIN$ and CONOUT$. The earlier list
+    /// stopped at the familiar names, so a label of "COM0" or "CONIN$" produced a file
+    /// that could not be created.
+    /// </remarks>
     private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+        "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "COM\u00B9", "COM\u00B2", "COM\u00B3",
+        "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "LPT\u00B9", "LPT\u00B2", "LPT\u00B3",
     };
+
+    /// <summary>
+    /// The longest file-name stem produced. A single path component may be at most
+    /// 255 characters; this leaves room for " (99) part12" and the extension. A long
+    /// label used to make the rename after finalisation fail, which left the recording
+    /// under its intermediate name and sent it nowhere.
+    /// </summary>
+    public const int MaxStemLength = 200;
 
     /// <summary>
     /// Produces the sanitised file name (without directory) for a recording.
@@ -74,7 +88,15 @@ public static partial class OutputNamer
             duration,
             context));
 
-        return Sanitize(name) + extension;
+        string stem = Sanitize(name);
+        if (stem.Length > MaxStemLength)
+        {
+            // Cut on a whole character, never between the halves of a surrogate pair.
+            int cut = char.IsLowSurrogate(stem[MaxStemLength]) ? MaxStemLength - 1 : MaxStemLength;
+            stem = Sanitize(stem[..cut]);
+        }
+
+        return stem + extension;
     }
 
     /// <summary>
@@ -153,7 +175,11 @@ public static partial class OutputNamer
     /// The first problem with a destination folder, or null when it is usable. Checks
     /// the tokens exactly as a file name would, then the literal path around them.
     /// </summary>
-    public static string? DescribeFolderPathProblem(string folderPattern)
+    /// <param name="folderPattern">The folder as configured, tokens and all.</param>
+    /// <param name="isLocalFolder">True for a folder destination (a full local or
+    /// network path); false for a folder inside a SharePoint library; null to check
+    /// only the tokens and characters, as before those placement rules existed.</param>
+    public static string? DescribeFolderPathProblem(string folderPattern, bool? isLocalFolder = null)
     {
         if (string.IsNullOrWhiteSpace(folderPattern))
         {
@@ -165,10 +191,10 @@ public static partial class OutputNamer
             return tokenProblem;
         }
 
-        // What is left after removing the tokens is the literal folder structure. It
+        // What is left after replacing the tokens is the literal folder structure. It
         // is checked on its own so an illegal character in the pattern is reported
         // even when every token in it is perfectly fine.
-        string literal = TokenPattern().Replace(folderPattern, "");
+        string literal = TokenPattern().Replace(folderPattern, "x");
         char[] invalid = Path.GetInvalidPathChars();
         char[] offending = [.. literal.Where(c => Array.IndexOf(invalid, c) >= 0).Distinct()];
         if (offending.Length > 0)
@@ -177,8 +203,56 @@ public static partial class OutputNamer
                    "which is not allowed in a path.";
         }
 
-        return null;
+        return isLocalFolder switch
+        {
+            true => DescribeLocalFolderProblem(literal),
+            false => DescribeLibraryFolderProblem(literal),
+            null => null,
+        };
     }
+
+    /// <summary>
+    /// A folder destination must say exactly where it is. A relative path resolved
+    /// against whatever directory the recorder happened to start in; a colon after the
+    /// drive letter wrote into a hidden alternate data stream of a folder; a device
+    /// path (\\?\, \\.\) bypassed Windows' own name checks; ".." climbed out of the
+    /// folder that was shown. Each of these was accepted before.
+    /// </summary>
+    private static string? DescribeLocalFolderProblem(string literal)
+    {
+        if (literal.StartsWith(@"\\?\", StringComparison.Ordinal) || literal.StartsWith(@"\\.\", StringComparison.Ordinal))
+        {
+            return "Use an ordinary path such as D:\\Recordings or \\\\server\\share\\recordings, not a device path (\\\\?\\ or \\\\.\\).";
+        }
+
+        if (!Path.IsPathFullyQualified(literal))
+        {
+            return "The folder must be a full path, such as D:\\Recordings or \\\\server\\share\\recordings.";
+        }
+
+        if (literal.IndexOf(':', 2) >= 0)
+        {
+            return "The folder contains ':' after the drive letter, which is not allowed in a path.";
+        }
+
+        return DescribeClimbingSegments(literal);
+    }
+
+    /// <summary>A folder inside a SharePoint library is a path WITHIN the library.</summary>
+    private static string? DescribeLibraryFolderProblem(string literal)
+    {
+        if (literal.Contains(':', StringComparison.Ordinal) || literal.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return "A SharePoint folder is a path inside the library, such as Recordings/2026 — not a drive or network path.";
+        }
+
+        return DescribeClimbingSegments(literal);
+    }
+
+    private static string? DescribeClimbingSegments(string literal) =>
+        literal.Split('\\', '/').Any(segment => segment.Trim() == "..")
+            ? "The folder contains '..', which would put recordings outside the folder named."
+            : null;
 
     /// <summary>
     /// The first problem with a naming pattern, or null when it is usable. Owns the
@@ -312,15 +386,18 @@ public static partial class OutputNamer
             return "recording";
         }
 
-        // "CON.mkv" would still address the console device; prefix rather than reject
-        // so the user's recording is saved regardless of their pattern.
-        string stem = sanitized.Contains('.') ? sanitized[..sanitized.IndexOf('.')] : sanitized;
-        if (ReservedNames.Contains(stem))
-        {
-            sanitized = "_" + sanitized;
-        }
+        return PrefixIfReserved(sanitized);
+    }
 
-        return sanitized;
+    /// <summary>
+    /// "CON.mkv" still addresses the console device, and so does "CON .mkv": Windows
+    /// ignores trailing spaces before the dot. Prefix rather than reject, so the
+    /// recording is saved whatever the pattern produced.
+    /// </summary>
+    private static string PrefixIfReserved(string name)
+    {
+        string stem = (name.Contains('.') ? name[..name.IndexOf('.')] : name).TrimEnd(' ');
+        return ReservedNames.Contains(stem) ? "_" + name : name;
     }
 
     /// <summary>
@@ -337,7 +414,10 @@ public static partial class OutputNamer
             builder.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
         }
 
-        return builder.ToString().Trim().TrimEnd('.');
+        // A token rendering to a device name ("CON") would make a folder Windows
+        // cannot create; one rendering to nothing but dots would name no folder at all.
+        string segment = builder.ToString().Trim().TrimEnd('.');
+        return segment.Length == 0 ? "_" : PrefixIfReserved(segment);
     }
 
     /// <summary>Matches <c>{name}</c> and <c>{name:format}</c>. The format runs to the

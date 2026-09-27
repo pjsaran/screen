@@ -48,8 +48,8 @@ public sealed class SessionPlanner
         }
 
         // 1. Settings must be valid (SPEC §8: block starting with a specific message).
-        IReadOnlyList<SettingsError> errors = SettingsValidator.Validate(settings);
-        if (errors.Count > 0)
+        SettingsError[] errors = [.. SettingsValidator.Validate(settings).Where(error => error.BlocksRecording)];
+        if (errors.Length > 0)
         {
             throw new SessionStartException(
                 "Settings are invalid:\n  " + string.Join("\n  ", errors.Select(e => $"{e.Field}: {e.Message}")));

@@ -125,4 +125,40 @@ public class OutputNamerTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Theory]
+    [InlineData("COM0")]
+    [InlineData("LPT0")]
+    [InlineData("COM\u00B9")]
+    [InlineData("CONIN$")]
+    [InlineData("CONOUT$")]
+    [InlineData("CON ")]
+    public void Every_device_name_Windows_reserves_is_made_safe(string label)
+    {
+        // The earlier list stopped at COM1-9/LPT1-9, so these produced a file name
+        // Windows cannot create, and the finished recording could not be renamed.
+        string name = OutputNamer.BuildFileName("{label}", Context with { Label = label });
+
+        name.ShouldStartWith("_");
+    }
+
+    [Fact]
+    public void An_over_long_name_is_cut_to_fit_a_single_path_component()
+    {
+        string name = OutputNamer.BuildFileName("{label}", Context with { Label = new string('x', 400) });
+
+        name.Length.ShouldBeLessThanOrEqualTo(OutputNamer.MaxStemLength + ".mkv".Length);
+        name.ShouldEndWith(".mkv");
+    }
+
+    [Fact]
+    public void An_over_long_name_is_never_cut_through_the_middle_of_a_character()
+    {
+        // An emoji is two UTF-16 units; cutting between them leaves an unpaired half.
+        string label = new string('x', OutputNamer.MaxStemLength - 1) + "\U0001F600";
+
+        string stem = Path.GetFileNameWithoutExtension(OutputNamer.BuildFileName("{label}", Context with { Label = label }));
+
+        char.IsHighSurrogate(stem[^1]).ShouldBeFalse();
+    }
 }

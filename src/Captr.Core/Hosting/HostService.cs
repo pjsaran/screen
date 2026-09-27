@@ -674,7 +674,7 @@ public sealed class HostService : IHostOperations
     /// Failures here are logged, never thrown — the recording itself is already
     /// safe on disk, and transfer problems must not look like recording problems.
     /// </summary>
-    private void HandleFinalized(FinalizationResult result)
+    internal void HandleFinalized(FinalizationResult result)
     {
         try
         {
@@ -693,35 +693,26 @@ public sealed class HostService : IHostOperations
             foreach (string output in result.OutputFiles)
             {
                 groupIndex++;
-                string desiredName = OutputNamer.BuildFileName(settings.OutputPattern, context);
-                if (result.OutputFiles.Count > 1)
-                {
-                    // Multiple arrangement groups: part-number the outputs.
-                    desiredName = Path.GetFileNameWithoutExtension(desiredName)
-                        + FormattableString.Invariant($" part{groupIndex}") + Path.GetExtension(desiredName);
-                }
 
-                string workingFolder = Path.GetDirectoryName(output)!;
-                string finalPath = OutputNamer.ResolveCollision(workingFolder, desiredName);
-                File.Move(output, finalPath);
-
-                // The integrity record was written against the pipeline's intermediate
-                // name; point it at the name the file now has. Skipping this makes
-                // `recordings verify` report EVERY finalised recording as missing.
-                if (!IntegrityRecord.RecordOutputRename(
-                        workingFolder, Path.GetFileName(output), Path.GetFileName(finalPath)))
-                {
-                    _log.Warning(
-                        "Renamed {Output} to {Final} but its integrity record could not be updated; " +
-                        "verification of this recording will report the output as missing",
-                        Path.GetFileName(output), Path.GetFileName(finalPath));
-                }
-
-                _log.Information("Output named {Final}", finalPath);
+                // Each output, and each destination, succeeds or fails on its own. One
+                // naming failure (a hand-edited pattern, an over-long label, a file held
+                // open by a virus scanner) used to abandon the whole hand-off: every
+                // output kept its intermediate name and NOTHING was queued anywhere,
+                // with a single log line to show for it.
+                string finalPath = NameOutput(output, settings.OutputPattern, context, groupIndex, result.OutputFiles.Count);
 
                 foreach (DestinationSettings destination in settings.Destinations.Where(d => d.Enabled))
                 {
-                    Enqueue(finalPath, destination, context, Path.GetExtension(finalPath));
+                    try
+                    {
+                        Enqueue(finalPath, destination, context, Path.GetExtension(finalPath));
+                    }
+                    catch (Exception exception) when (exception is not OutOfMemoryException)
+                    {
+                        _log.Error(exception,
+                            "Could not queue {File} for {Destination}; queue it again from Recordings > Send again",
+                            finalPath, destination.Name);
+                    }
                 }
             }
 
@@ -739,6 +730,55 @@ public sealed class HostService : IHostOperations
         }
 
         Touch();
+    }
+
+    /// <summary>
+    /// Renames one finalised output by the pattern and returns where it now is. Falls
+    /// back to the default pattern, and then to the name it already has, so that a
+    /// naming problem costs a nice file name - never the transfer.
+    /// </summary>
+    private string NameOutput(string output, string pattern, NamingContext context, int groupIndex, int groupCount)
+    {
+        string workingFolder = Path.GetDirectoryName(output)!;
+        foreach (string candidatePattern in new[] { pattern, OutputNamer.DefaultPattern }.Distinct(StringComparer.Ordinal))
+        {
+            try
+            {
+                string desiredName = OutputNamer.BuildFileName(candidatePattern, context);
+                if (groupCount > 1)
+                {
+                    // Multiple arrangement groups: part-number the outputs.
+                    desiredName = Path.GetFileNameWithoutExtension(desiredName)
+                        + FormattableString.Invariant($" part{groupIndex}") + Path.GetExtension(desiredName);
+                }
+
+                string finalPath = OutputNamer.ResolveCollision(workingFolder, desiredName);
+                File.Move(output, finalPath);
+
+                // The integrity record was written against the pipeline's intermediate
+                // name; point it at the name the file now has. Skipping this makes
+                // `recordings verify` report EVERY finalised recording as missing.
+                if (!IntegrityRecord.RecordOutputRename(
+                        workingFolder, Path.GetFileName(output), Path.GetFileName(finalPath)))
+                {
+                    _log.Warning(
+                        "Renamed {Output} to {Final} but its integrity record could not be updated; " +
+                        "verification of this recording will report the output as missing",
+                        Path.GetFileName(output), Path.GetFileName(finalPath));
+                }
+
+                _log.Information("Output named {Final}", finalPath);
+                return finalPath;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                                                  or ArgumentException or FormatException)
+            {
+                _log.Error(exception, "Could not name {Output} with the pattern {Pattern}", Path.GetFileName(output), candidatePattern);
+            }
+        }
+
+        _log.Warning("{Output} keeps its working name; it is transferred under that name", Path.GetFileName(output));
+        return output;
     }
 
     /// <summary>
@@ -785,7 +825,7 @@ public sealed class HostService : IHostOperations
         {
             return OutputNamer.ExpandFolderPath(configured, context);
         }
-        catch (ArgumentException exception)
+        catch (Exception exception) when (exception is ArgumentException or FormatException)
         {
             _log.Error(exception,
                 "Destination {Destination} has an invalid folder pattern; sending to the folder as written instead",
@@ -811,7 +851,7 @@ public sealed class HostService : IHostOperations
             string name = OutputNamer.BuildFileName(destination.FileNamePattern, context);
             return Path.HasExtension(name) ? name : name + extension;
         }
-        catch (ArgumentException exception)
+        catch (Exception exception) when (exception is ArgumentException or FormatException)
         {
             // A bad pattern must never cost a transfer: fall back to the local name
             // and say loudly which destination needs fixing.

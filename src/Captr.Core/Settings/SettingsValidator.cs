@@ -129,12 +129,27 @@ public static class SettingsValidator
     /// same reason names are: a broken one must be caught while the user is typing,
     /// not when a finished recording has nowhere to go.
     /// </summary>
-    private static void ValidateFolderPattern(string? folder, string field, List<SettingsError> errors)
+    /// <remarks>
+    /// The full-path, stream and ".." rules were added after release. A settings file
+    /// saved before them still RECORDS - those errors do not block a start, so an
+    /// upgrade can never stop someone recording over a destination - but the file is
+    /// refused when edited, Diagnostics reports it, and the transfer itself fails with
+    /// the same words instead of writing somewhere unexpected.
+    /// </remarks>
+    private static void ValidateFolderPattern(string? folder, bool isLocalFolder, string field, List<SettingsError> errors)
     {
-        if (!string.IsNullOrWhiteSpace(folder)
-            && OutputNamer.DescribeFolderPathProblem(folder) is { } problem)
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return;
+        }
+
+        if (OutputNamer.DescribeFolderPathProblem(folder) is { } problem)
         {
             errors.Add(new(field, problem));
+        }
+        else if (OutputNamer.DescribeFolderPathProblem(folder, isLocalFolder) is { } placement)
+        {
+            errors.Add(new(field, placement) { BlocksRecording = false });
         }
     }
 
@@ -177,10 +192,16 @@ public static class SettingsValidator
             ValidatePattern(destination.FileNamePattern, field, errors);
         }
 
-        ValidateFolderPattern(destination.FolderPath, field, errors);
-        ValidateFolderPattern(destination.SharePointFolder, field, errors);
+        ValidateFolderPattern(destination.FolderPath, destination.Kind == DestinationKind.Folder, field, errors);
+        ValidateFolderPattern(destination.SharePointFolder, isLocalFolder: false, field, errors);
     }
 }
 
 /// <summary>One validation problem: which field, and what to do about it.</summary>
-public sealed record SettingsError(string Field, string Message);
+public sealed record SettingsError(string Field, string Message)
+{
+    /// <summary>Whether this problem stops a recording from starting. Only rules
+    /// added after release set it false (see ValidateFolderPattern); everything else
+    /// blocks, as SPEC §8 asks.</summary>
+    public bool BlocksRecording { get; init; } = true;
+}

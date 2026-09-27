@@ -241,6 +241,12 @@ public sealed class TransferWorker : IDisposable
             {
                 case DestinationKind.Folder:
                     string folder = ResolveFolder(item, destination.FolderPath!);
+                    if (Naming.OutputNamer.DescribeFolderPathProblem(folder, isLocalFolder: true) is { } unusable)
+                    {
+                        // Classified as permanent below, with these words.
+                        throw new ArgumentException(unusable);
+                    }
+
                     string landed = await FolderDestination.TransferAsync(
                         item.OutputPath, folder, targetName,
                         ProgressReporterFor(item), attemptToken).ConfigureAwait(false);

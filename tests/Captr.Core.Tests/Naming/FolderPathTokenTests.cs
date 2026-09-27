@@ -104,4 +104,51 @@ public class FolderPathTokenTests
     [Fact]
     public void A_valid_token_format_in_a_folder_is_accepted() =>
         OutputNamer.DescribeFolderPathProblem(@"\\nas\video\{date:yyyy}\{machine}").ShouldBeNull();
+
+    [Theory]
+    [InlineData(@"Recordings")]
+    [InlineData(@"Recordings\{date:yyyy}")]
+    [InlineData(@"\Recordings")]
+    [InlineData(@"D:Recordings")]
+    public void A_folder_destination_must_be_a_full_path(string folder)
+    {
+        // A relative folder resolved against whatever directory the recorder happened
+        // to start in, and was accepted.
+        OutputNamer.DescribeFolderPathProblem(folder, isLocalFolder: true).ShouldNotBeNull().ShouldContain("full path");
+    }
+
+    [Theory]
+    [InlineData(@"D:\Recordings:hidden")]
+    [InlineData(@"D:\Recordings\..\..\Windows")]
+    [InlineData(@"\\?\D:\Recordings")]
+    [InlineData(@"\\.\D:\Recordings")]
+    public void A_folder_destination_cannot_hide_in_a_stream_climb_out_or_use_a_device_path(string folder)
+    {
+        OutputNamer.DescribeFolderPathProblem(folder, isLocalFolder: true).ShouldNotBeNull();
+    }
+
+    [Theory]
+    [InlineData(@"D:\Recordings\{date:yyyy}")]
+    [InlineData(@"\\nas\video\{machine}")]
+    public void Ordinary_full_paths_remain_fine(string folder)
+    {
+        OutputNamer.DescribeFolderPathProblem(folder, isLocalFolder: true).ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("C:/Recordings")]
+    [InlineData("Shared Documents/../Other")]
+    public void A_SharePoint_folder_is_a_path_inside_the_library(string folder)
+    {
+        OutputNamer.DescribeFolderPathProblem(folder, isLocalFolder: false).ShouldNotBeNull();
+        OutputNamer.DescribeFolderPathProblem("Shared Documents/Captr/{date:yyyy}", isLocalFolder: false).ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_token_that_renders_to_a_device_name_does_not_create_an_unusable_folder()
+    {
+        string path = OutputNamer.ExpandFolderPath(@"D:\Recordings\{label}", Context with { Label = "CON" });
+
+        path.ShouldBe(@"D:\Recordings\_CON");
+    }
 }

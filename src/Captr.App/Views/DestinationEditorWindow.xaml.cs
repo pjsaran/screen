@@ -211,7 +211,8 @@ public partial class DestinationEditorWindow
         }
 
         if (OutputNamer.DescribeFolderPathProblem(
-                kind.Kind == DestinationKind.Folder ? FolderBox.Text : SharePointFolderBox.Text) is { } folderProblem)
+                kind.Kind == DestinationKind.Folder ? FolderBox.Text : SharePointFolderBox.Text,
+                isLocalFolder: kind.Kind == DestinationKind.Folder) is { } folderProblem)
         {
             ShowError(folderProblem);
             return;
