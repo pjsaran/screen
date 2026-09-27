@@ -4,6 +4,13 @@ One `.exe` installer containing the application, the command line, the bundled
 FFmpeg, the .NET runtime, and the licence texts. Nothing needs to be installed
 first.
 
+In a signed release, every executable and DLL it installs carries a digital
+signature, and so do the installer and the uninstaller, so Windows names Captr's
+publisher instead of "Unknown publisher". Debugging symbols (`.pdb` files) are not
+installed. The licence and third-party notices are in the `licenses` folder beside
+the program (`THIRD-PARTY.md`, the FFmpeg source offer, and the .NET runtime's
+licence and notices), with FFmpeg's own licence texts in `ffmpeg\licenses`.
+
 **Nothing else is installed** — no service, no scheduled task, no resident agent,
 no browser extension, no startup entry. Captr runs when you run it.
 
@@ -22,15 +29,22 @@ which needs administrator rights once, at install time. Recording itself never
 needs elevation.
 
 > After installing, open a **new** terminal window before typing `captr`. An
-> already-open terminal has the old PATH.
+> already-open terminal has the old PATH. You do not need to sign out: the installer
+> tells Windows the PATH changed, so a terminal opened afterwards finds `captr`.
 
 ## Silent and unattended installation
 
 For Intune, SCCM, PDQ, or any script:
 
 ```bat
-captr-setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES
+captr-setup-<version>.exe /VERYSILENT
 ```
+
+A silent install **never waits for anyone**, with or without `/SUPPRESSMSGBOXES`:
+there is no question it can stop on, and anything it would have said in a message
+box goes to the setup log instead. It either finishes or exits with a code that says
+why not (see [exit codes](#exit-codes) below). That matters most where it is hardest
+to see — a deployment tool running setup with nobody signed in.
 
 | Switch | Effect |
 |---|---|
@@ -39,10 +53,10 @@ captr-setup-<version>.exe /VERYSILENT /SUPPRESSMSGBOXES
 | `/CURRENTUSER` | Install for the current user only (`%LOCALAPPDATA%\Programs\Captr`). No elevation needed. |
 | `/MERGETASKS="!shortcuts"` | Do not create the Start Menu shortcut. |
 | `/MERGETASKS="!addtopath"` | Do not touch PATH. |
-| `/WORKINGFOLDER="D:\Recordings"` | Preset where recordings are written. Applies to the installing user; other users keep the default until they change it. |
-| `/FORCESTOP=yes` | If a recording is in progress, stop it, **wait for it to finalise**, then install. Without this the installer refuses. |
+| `/WORKINGFOLDER="D:\Recordings"` | Preset where recordings are written, when setup creates the installing user's settings file. Other users keep the default until they change it. A trailing backslash (`"D:\Recordings\"`) is fine. |
+| `/FORCESTOP=yes` | If a recording is in progress, stop it, **wait for it to finalise**, then install. Also closes Captr where it is running for **another account** on the PC — a per-machine (elevated) setup can do that, a `/CURRENTUSER` one cannot — and that person's recording, if there was one, is recovered the next time they start Captr. Without this switch setup refuses in both cases. |
 | `/ALLOWDOWNGRADE=yes` | Permit installing an older version over a newer one. Refused otherwise. |
-| `/LOG="C:\temp\captr-setup.log"` | Write a setup log. |
+| `/LOG="C:\temp\captr-setup.log"` | Write a setup log. Every refusal is explained there. |
 
 Switches can be combined:
 
@@ -50,12 +64,30 @@ Switches can be combined:
 captr-setup-0.1.0.exe /VERYSILENT /MERGETASKS="!shortcuts" /WORKINGFOLDER="D:\Recordings"
 ```
 
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Installed. |
+| `1` | Refused before anything was changed: a recording is in progress (and `/FORCESTOP=yes` was not given, or the recording could not be stopped cleanly within about two minutes), or this would be a downgrade without `/ALLOWDOWNGRADE=yes`. Interactively, it is also what answering No gives. |
+| `7` | Could not prepare to install: Captr is running for another account on this PC, and `/FORCESTOP=yes` was not given. |
+
+These are Inno Setup's own codes for "setup could not initialise" and "the
+preparing-to-install step failed"; the setup log (`/LOG=`) gives the reason in
+words.
+
 ## What the installer checks before it starts
 
 - **64-bit Windows 10 1809 (build 17763) or newer.** Older or 32-bit is refused
   with a message rather than installed and broken.
 - **Nothing is recording.** Installing over a live recording would kill it
-  mid-file. Use `/FORCESTOP=yes` to stop and finalise it first.
+  mid-file. Use `/FORCESTOP=yes` to stop and finalise it first. Setup asks as the
+  person who started it — the only account whose recorder it can see — and never
+  runs the installed `captr` with administrator rights.
+- **Captr is not running for someone else.** Setup closes your own Captr (the window
+  and an idle recorder) before replacing its files. If Captr is still running for
+  another account on the PC it may be recording, so setup stops and says so (exit
+  `7`) unless `/FORCESTOP=yes` is given.
 - **Whether Captr is already installed**, and what you are about to do to it:
 
   | Situation | What you are asked |
@@ -65,9 +97,15 @@ captr-setup-0.1.0.exe /VERYSILENT /MERGETASKS="!shortcuts" /WORKINGFOLDER="D:\Re
   | An **older** version | "Captr *x* is installed. This will upgrade it to *y*." Your recordings, settings, credentials, and pending transfers are all kept. |
   | A **newer** version | A warning: settings are migrated **forward only**, so a file written by the newer version may not load in the older one and Captr would start from defaults. Defaults to **not** downgrading. |
 
-  Silent installs are not blocked by these: they take the default answer, so
-  `/VERYSILENT` still reinstalls and upgrades unattended. A downgrade still needs
-  `/ALLOWDOWNGRADE=yes`.
+  Silent installs (`/SILENT` or `/VERYSILENT`) are never asked: a reinstall or an
+  upgrade simply proceeds, and a downgrade is refused — written to the setup log,
+  exit `1` — unless `/ALLOWDOWNGRADE=yes` is given.
+
+  A Captr that finds a settings file written by a newer version does not throw it
+  away: it keeps it, untouched, as `settings.json.from-schema-<N>` beside
+  `settings.json`, starts from defaults, and says so on the Diagnostics page.
+  Installing the newer version again and putting that file back as `settings.json`
+  restores everything.
 
 ## Your settings on a fresh machine
 
@@ -78,7 +116,11 @@ An install that finds an existing settings file **never overwrites it** — that
 what makes an upgrade, a repair, and a reinstall-after-uninstall all keep your
 configuration.
 
-`/WORKINGFOLDER="D:\Recordings"` presets the working folder in that first file.
+`/WORKINGFOLDER="D:\Recordings"` presets the working folder in that first file; an
+existing settings file is left alone, switch or not. The file is created as the
+person who ran setup, not as the administrator account that elevated it, so it lands
+where that person's Captr looks. If creating it fails, setup logs why and carries on,
+and Captr creates its settings on first use.
 
 ## Upgrading
 
@@ -101,6 +143,12 @@ Re-running the same version repairs the installation.
 "%LOCALAPPDATA%\Programs\Captr\unins000.exe" /VERYSILENT
 ```
 
+**The uninstaller refuses while a recording is in progress**, because removing the
+program under a running recorder would cut the recording off. Stop it first, or run
+the uninstaller with `/FORCESTOP=yes`, which stops the recording, waits for it to be
+finalised, and then uninstalls. The check asks the recorder of the account running
+the uninstaller.
+
 After confirming you want to remove Captr, the uninstaller asks one question with
 two clearly labelled choices:
 
@@ -110,7 +158,10 @@ two clearly labelled choices:
 - **Delete everything Captr has stored** — asks once more, because deleting
   recordings cannot be undone.
 
-**Keeping is the default**, and a silent uninstall always keeps.
+**Keeping is the default**, and a silent uninstall always keeps. Even "Delete
+everything" removes only `%LOCALAPPDATA%\Captr` (and `%APPDATA%\Captr`, where a much
+older Captr kept its settings): a working folder you chose elsewhere, such as
+`D:\Recordings`, is never touched by the uninstaller.
 
 Stored SharePoint secrets are not removed by the uninstaller. Remove them first if
 you want them gone:
