@@ -620,23 +620,49 @@ public sealed class HostService : IHostOperations
 
         int queued = 0;
         var skipped = new List<string>();
+        var waiting = new List<string>();
         foreach (HashedFile output in record.Outputs)
         {
-            string path = Path.Combine(request.Folder, output.FileName);
+            if (IntegrityRecord.ResolveWithin(request.Folder, output.FileName) is not { } path)
+            {
+                _log.Warning("Re-send ignored {Name} in {Folder}: it is not a file in that folder", output.FileName, request.Folder);
+                continue;
+            }
+
             if (!File.Exists(path))
             {
                 continue;
             }
 
-            IReadOnlyList<string> alreadyThere = _transferQueue.CompletedDestinationsFor(path);
+            IReadOnlyList<TransferItem> earlier = _transferQueue.ForOutput(path);
             foreach (DestinationSettings destination in destinations)
             {
+                TransferItem[] rows =
+                    [.. earlier.Where(row => string.Equals(row.DestinationName, destination.Name, StringComparison.OrdinalIgnoreCase))];
+
                 // Sending a second copy to a destination that already has it would
-                // land beside the first as "name (2)" and mean nothing. Skipping is
-                // what makes this button safe to press twice.
-                if (alreadyThere.Contains(destination.Name, StringComparer.OrdinalIgnoreCase))
+                // land beside the first as "name (2)" and mean nothing.
+                if (rows.Any(row => row.State == TransferQueue.StateCompleted))
                 {
                     skipped.Add(destination.Name);
+                    continue;
+                }
+
+                // Already on its way: a second row would upload a second copy. Only
+                // completed rows were checked before, so pressing Send again twice, or
+                // while a transfer was pending, queued a duplicate every time.
+                if (rows.Any(row => row.State is TransferQueue.StatePending or TransferQueue.StateInProgress))
+                {
+                    waiting.Add(destination.Name);
+                    continue;
+                }
+
+                // Stopped, failed, or waiting for sign-in: bring THAT transfer back
+                // rather than adding another, which also stops the stuck row holding
+                // the recording back from retention for ever.
+                if (rows.FirstOrDefault() is { } stuck && _transferQueue.Retry(stuck.Id))
+                {
+                    queued++;
                     continue;
                 }
 
@@ -646,24 +672,27 @@ public sealed class HostService : IHostOperations
         }
 
         _log.Information("Re-send queued {Count} transfer(s) for {Folder}", queued, request.Folder);
-        return Task.FromResult(new ResendResponse(queued, DescribeResend(queued, destinations.Count, skipped)));
+        return Task.FromResult(new ResendResponse(queued, DescribeResend(queued, destinations.Count, skipped, waiting)));
     }
 
     /// <summary>Plain English for what a re-send actually did, including the case
     /// where every destination already has the file and nothing was queued.</summary>
-    private static string DescribeResend(int queued, int destinationCount, List<string> skipped)
+    private static string DescribeResend(int queued, int destinationCount, List<string> skipped, List<string> waiting)
     {
-        string skippedText = skipped.Count == 0
+        string skippedText = (skipped.Count == 0
             ? ""
-            : $" Already at: {string.Join(", ", skipped.Distinct(StringComparer.OrdinalIgnoreCase))}.";
+            : $" Already at: {string.Join(", ", skipped.Distinct(StringComparer.OrdinalIgnoreCase))}.") +
+            (waiting.Count == 0
+                ? ""
+                : $" Already on its way to: {string.Join(", ", waiting.Distinct(StringComparer.OrdinalIgnoreCase))}.");
 
         if (queued > 0)
         {
             return $"Queued {queued} transfer(s) across {destinationCount} destination(s).{skippedText}";
         }
 
-        return skipped.Count > 0
-            ? $"Nothing to send — every enabled destination already has this recording.{skippedText}"
+        return skipped.Count + waiting.Count > 0
+            ? $"Nothing new to send — every enabled destination already has this recording or is receiving it.{skippedText}"
             : "Nothing to send — the output files are no longer in the working folder.";
     }
 

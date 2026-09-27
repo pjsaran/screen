@@ -540,6 +540,24 @@ public sealed class TransferQueue
         return items;
     }
 
+    /// <summary>Every transfer ever queued for one output, newest first. "Send again"
+    /// uses it to re-arm a stuck transfer rather than queue a second copy.</summary>
+    public IReadOnlyList<TransferItem> ForOutput(string outputPath)
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = SelectColumns + "WHERE output_path = $path ORDER BY id DESC;";
+        command.Parameters.AddWithValue("$path", outputPath);
+        using SqliteDataReader reader = command.ExecuteReader();
+        var items = new List<TransferItem>();
+        while (reader.Read())
+        {
+            items.Add(ReadItem(reader));
+        }
+
+        return items;
+    }
+
     /// <summary>True when every enqueued transfer for this output has completed —
     /// one precondition for local cleanup (SPEC §7: delete only after every enabled
     /// destination confirmed).</summary>

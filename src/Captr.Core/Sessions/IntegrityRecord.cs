@@ -102,6 +102,31 @@ public sealed record IntegrityRecord
     }
 
     /// <summary>
+    /// The full path of a file this record names, or null when the name is not a
+    /// plain file name inside <paramref name="workingFolder"/>.
+    /// </summary>
+    /// <remarks>
+    /// The record is a file in a folder other people may be able to write to (a
+    /// working folder under a drive root inherits "Authenticated Users: Modify"). Its
+    /// names were combined with the folder as they stood, so a rooted name or one with
+    /// "..\" in it made "Send again" queue ANY file - an SSH key, a password vault - to
+    /// every destination, and made Verify hash it. Only a bare name is accepted.
+    /// </remarks>
+    public static string? ResolveWithin(string workingFolder, string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)
+            || !string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal)
+            || fileName is "." or "..")
+        {
+            return null;
+        }
+
+        string folder = Path.GetFullPath(workingFolder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string path = Path.GetFullPath(Path.Combine(folder, fileName));
+        return path.StartsWith(folder, StringComparison.OrdinalIgnoreCase) ? path : null;
+    }
+
+    /// <summary>
     /// The verification pass: recomputes every hash on disk and compares. Any
     /// mismatch, missing file, or size change is reported — proving (or disproving)
     /// that nothing was altered since finalisation (SPEC §6).
@@ -114,7 +139,12 @@ public sealed record IntegrityRecord
                  Segments.Select(s => (s.FileName, s.SizeBytes, s.Sha256))
                      .Concat(Outputs.Select(o => (o.FileName, o.SizeBytes, o.Sha256))))
         {
-            string path = Path.Combine(workingFolder, fileName);
+            if (ResolveWithin(workingFolder, fileName) is not { } path)
+            {
+                problems.Add($"{fileName}: not a file in this recording's folder - the integrity record has been altered");
+                continue;
+            }
+
             if (!File.Exists(path))
             {
                 problems.Add($"{fileName}: missing");
