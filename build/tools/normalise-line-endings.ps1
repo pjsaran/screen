@@ -29,7 +29,10 @@ $changed = 0
 Get-ChildItem -Path $Root -Recurse -File |
     Where-Object {
         $extensions -contains $_.Extension -and
-        $_.FullName -notmatch '[\/](obj|bin|artifacts|publish|\.git)[\/]'
+        # [\\/] is "either separator". It was once written with a single backslash,
+        # which a .NET regex reads as a class holding only '/', so on Windows nothing
+        # was ever excluded: build output, fetched tools, and .git were all rewritten.
+        $_.FullName.Substring($Root.Length) -notmatch '[\\/](obj|bin|artifacts|publish|tools|TestResults|\.git)[\\/]'
     } |
     ForEach-Object {
         $bytes = [System.IO.File]::ReadAllBytes($_.FullName)

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Builds the signed Captr installer with Inno Setup (SPEC §11) plus checksums and
     the machine-readable release record.

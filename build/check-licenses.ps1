@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Mechanically verifies every NuGet dependency (including transitive ones) carries a
     licence acceptable for commercial use, and keeps a committed report so drift is
