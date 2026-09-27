@@ -177,6 +177,31 @@ public partial class DestinationEditorWindow
         }
     }
 
+    /// <summary>
+    /// Shows, as the person types, the name and folder a recording made now would
+    /// get here - or what is wrong - instead of only refusing on Save.
+    /// </summary>
+    private void OnNamingChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
+        // TextChanged fires while the window is still being built.
+        if (PatternPreview is null || FolderPreview is null || SharePointFolderPreview is null)
+        {
+            return;
+        }
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        Show(PatternPreview, NamingPreview.ForDestinationFileName(PatternBox.Text, now));
+        Show(FolderPreview, NamingPreview.ForFolder(FolderBox.Text, isLocalFolder: true, now));
+        Show(SharePointFolderPreview, NamingPreview.ForFolder(SharePointFolderBox.Text, isLocalFolder: false, now));
+    }
+
+    private void Show(System.Windows.Controls.TextBlock target, NamingPreview.Result preview)
+    {
+        target.Text = preview.Text;
+        target.Style = (Style)FindResource(preview.IsProblem ? "ErrorText" : "FieldHint");
+        target.Visibility = preview.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private void OnSaveClicked(object sender, RoutedEventArgs e)
     {
         DestinationKindInfo kind = SelectedKind;

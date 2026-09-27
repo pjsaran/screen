@@ -241,7 +241,15 @@
                         </Grid>
 
                         <TextBlock theme:Typo.Text="Naming pattern" Style="{StaticResource FieldLabel}" />
-                        <TextBox Text="{Binding OutputPattern, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBox Text="{Binding OutputPattern, UpdateSourceTrigger=PropertyChanged}"
+                                 AutomationProperties.Name="Naming pattern" />
+                        <!-- Live: the name a recording would get, or what is wrong. -->
+                        <TextBlock Text="{Binding OutputPatternPreview}" Style="{StaticResource FieldHint}" TextWrapping="Wrap"
+                                   AutomationProperties.LiveSetting="Polite"
+                                   Visibility="{Binding OutputPatternIsInvalid, Converter={StaticResource InverseBoolToVisibility}}" />
+                        <TextBlock Text="{Binding OutputPatternPreview}" Style="{StaticResource ErrorText}" TextWrapping="Wrap"
+                                   AutomationProperties.LiveSetting="Polite"
+                                   Visibility="{Binding OutputPatternIsInvalid, Converter={StaticResource BoolToVisibility}}" />
                         <TextBlock Style="{StaticResource FieldHint}"
                                    Text="Tokens like {date} and {machine} build the name — the Help page lists them all." />
 

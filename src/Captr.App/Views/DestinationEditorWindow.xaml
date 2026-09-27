@@ -61,11 +61,14 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <ui:TextBox x:Name="FolderBox" Grid.Column="0"
+                    <ui:TextBox x:Name="FolderBox" Grid.Column="0" TextChanged="OnNamingChanged"
+                                AutomationProperties.Name="Destination folder"
                                 PlaceholderText="D:\Recordings or \\server\share\recordings\{date:yyyy-MM}" />
                     <ui:Button Style="{StaticResource ActionButton}" Grid.Column="1" Content="Browse…" Margin="6,0,0,0"
                                Click="OnBrowseClicked" />
                 </Grid>
+                <TextBlock x:Name="FolderPreview" Style="{StaticResource FieldHint}" TextWrapping="Wrap"
+                           AutomationProperties.LiveSetting="Polite" Visibility="Collapsed" />
                 <TextBlock Style="{StaticResource FieldHint}"
                            Text="A local folder, mapped drive, or \\server\share. Tokens like {date:yyyy-MM} work here — see Help." />
             </StackPanel>
@@ -91,7 +94,10 @@
                                    Text="The document library's id, from GET /sites/{site-id}/drives. Test connection checks it." />
 
                         <TextBlock theme:Typo.Text="Folder in the library" Style="{StaticResource FieldLabel}" />
-                        <ui:TextBox x:Name="SharePointFolderBox" PlaceholderText="Shared Documents/Captr/{date:yyyy-MM}" />
+                        <ui:TextBox x:Name="SharePointFolderBox" PlaceholderText="Shared Documents/Captr/{date:yyyy-MM}"
+                                    TextChanged="OnNamingChanged" AutomationProperties.Name="Folder in the SharePoint library" />
+                        <TextBlock x:Name="SharePointFolderPreview" Style="{StaticResource FieldHint}" TextWrapping="Wrap"
+                                   AutomationProperties.LiveSetting="Polite" Visibility="Collapsed" />
                         <TextBlock Style="{StaticResource FieldHint}"
                                    Text="Where uploads land. Tokens work here too — see Help." />
                     </StackPanel>
@@ -121,7 +127,10 @@
             </Border>
 
             <TextBlock theme:Typo.Text="File name at this destination" Style="{StaticResource FieldLabel}" />
-            <ui:TextBox x:Name="PatternBox" PlaceholderText="Leave empty to keep the recording's own name" />
+            <ui:TextBox x:Name="PatternBox" PlaceholderText="Leave empty to keep the recording's own name"
+                        TextChanged="OnNamingChanged" AutomationProperties.Name="File name at this destination" />
+            <TextBlock x:Name="PatternPreview" Style="{StaticResource FieldHint}" TextWrapping="Wrap"
+                       AutomationProperties.LiveSetting="Polite" Visibility="Collapsed" />
             <TextBlock Style="{StaticResource FieldHint}"
                        Text="Only needed when this place wants its own naming. The Help page lists the tokens." />
 
