@@ -87,6 +87,20 @@ public class RetentionCleanerTests : IDisposable
     }
 
     [Fact]
+    public void A_session_is_judged_on_its_own_transfers_not_those_of_a_folder_whose_name_it_prefixes()
+    {
+        // "S1" is a string prefix of "S10\output.mkv". S1 was never transferred
+        // anywhere: its local copy is the only copy, and S10 being done says nothing.
+        string onlyCopy = MakeSession("S1", finalizedDaysAgo: 30);
+        string transferred = MakeSession("S10", finalizedDaysAgo: 30);
+        _queue.Complete(_queue.Enqueue(Path.Combine(transferred, "output.mkv"), "archive"));
+
+        MakeCleaner().Clean(Now).ShouldBe([transferred]);
+
+        Directory.Exists(onlyCopy).ShouldBeTrue();
+    }
+
+    [Fact]
     public void A_session_inside_the_retention_period_is_kept()
     {
         string folder = MakeSession("recent-transferred", finalizedDaysAgo: 3);

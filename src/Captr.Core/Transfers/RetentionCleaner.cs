@@ -117,9 +117,12 @@ public sealed class RetentionCleaner
         // Every transfer recorded for anything in this folder must have completed,
         // and there must be at least one — see the class remarks on why "no
         // destinations configured" must NOT qualify.
+        // With the separator: "...\S1" is a prefix of "...\S10\out.mkv", so without it
+        // S10's completed transfers let S1 - never transferred anywhere - be deleted.
+        string inside = Path.GetFullPath(sessionFolder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         List<TransferItem> forThisSession =
         [
-            .. transfers.Where(d => d.OutputPath.StartsWith(sessionFolder, StringComparison.OrdinalIgnoreCase)),
+            .. transfers.Where(d => d.OutputPath.StartsWith(inside, StringComparison.OrdinalIgnoreCase)),
         ];
 
         if (forThisSession.Count == 0)
