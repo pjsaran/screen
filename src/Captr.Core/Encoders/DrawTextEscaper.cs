@@ -38,18 +38,30 @@ public static class DrawTextEscaper
     /// <item><c>:</c> — option-parser level: <c>\:</c>, whose backslash the graph
     /// parser must itself see escaped → <c>\\:</c>.</item>
     /// <item><c>'</c> — option level <c>\'</c>, then the backslash re-escaped → <c>\\\'</c>.</item>
-    /// <item><c>\</c> — escaped at both levels → <c>\\\\</c>.</item>
+    /// <item><c>\</c> — drawtext's OWN expansion treats a backslash as an escape too,
+    /// so it must arrive there as <c>\\</c>; escaped at both parser levels on top →
+    /// eight. Four (the old value) arrived as one, which drawtext then ate along with
+    /// the character after it.</item>
+    /// <item><c>%</c> not starting <c>%{…}</c> — drawtext reads <c>%</c> as the start
+    /// of an expansion; a literal one must arrive as <c>\%</c> → <c>\\\\%</c> here.
+    /// Left bare, "100% done" rendered wrongly.</item>
     /// </list>
+    /// Proved against the pinned FFmpeg by DrawTextOnRealFfmpegTests, which compares
+    /// every rendering with the same text drawn verbatim from a file.
     /// </remarks>
     public static string Escape(string text)
     {
         var builder = new System.Text.StringBuilder(text.Length + 8);
-        foreach (char c in text)
+        for (int i = 0; i < text.Length; i++)
         {
+            char c = text[i];
             switch (c)
             {
                 case '\\':
-                    builder.Append(@"\\\\");
+                    builder.Append(@"\\\\\\\\");
+                    break;
+                case '%' when i + 1 >= text.Length || text[i + 1] != '{':
+                    builder.Append(@"\\\\%");
                     break;
                 case '\'':
                     builder.Append(@"\\\'");

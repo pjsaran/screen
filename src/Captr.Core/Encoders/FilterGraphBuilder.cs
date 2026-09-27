@@ -145,7 +145,7 @@ public static class FilterGraphBuilder
     /// <summary>The overlay filter. The text and the font path both pass through
     /// <see cref="DrawTextEscaper"/> — see SPEC §5's warning about colons and
     /// backslashes silently breaking the graph.</summary>
-    private static string BuildDrawText(string overlayText)
+    internal static string BuildDrawText(string overlayText)
     {
         // Consolas ships with every supported Windows and is monospaced, which keeps
         // a timestamp overlay steady instead of jittering as digits change width.

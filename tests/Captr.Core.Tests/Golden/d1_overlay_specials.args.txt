@@ -3,7 +3,7 @@
 -loglevel
 warning
 -filter_complex
-ddagrab=output_idx=0:framerate=15:draw_mouse=1,hwdownload,format=bgra,pad=w=1920:h=1080:x=(ow-iw)/2:y=(oh-ih)/2:color=black[s0];[s0]drawtext=fontfile=C\\:/Windows/Fonts/consola.ttf:text=C\\:\\\\path 10\\:30\, \[x\]\;a=\\\'b\\\':fontsize=24:fontcolor=white:box=1:boxcolor=black@0.4:boxborderw=6:x=12:y=12,format=yuv420p[v]
+ddagrab=output_idx=0:framerate=15:draw_mouse=1,hwdownload,format=bgra,pad=w=1920:h=1080:x=(ow-iw)/2:y=(oh-ih)/2:color=black[s0];[s0]drawtext=fontfile=C\\:/Windows/Fonts/consola.ttf:text=C\\:\\\\\\\\path 10\\:30\, \[x\]\;a=\\\'b\\\':fontsize=24:fontcolor=white:box=1:boxcolor=black@0.4:boxborderw=6:x=12:y=12,format=yuv420p[v]
 -map
 [v]
 -c:v

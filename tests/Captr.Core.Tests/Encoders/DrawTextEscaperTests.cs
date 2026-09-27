@@ -22,7 +22,10 @@ public class DrawTextEscaperTests
     // forms were validated against the real ffmpeg binary, not just against docs.
     [Theory]
     [InlineData(":", @"\\:")]
-    [InlineData("\\", @"\\\\")]
+    [InlineData("\\", @"\\\\\\\\")]
+    [InlineData("%", @"\\\\%")]
+    [InlineData("100%", @"100\\\\%")]
+    [InlineData("%{localtime}", "%{localtime}")]
     [InlineData("'", @"\\\'")]
     [InlineData(",", @"\,")]
     [InlineData(";", @"\;")]
@@ -37,7 +40,7 @@ public class DrawTextEscaperTests
     public void A_windows_path_with_time_survives()
     {
         DrawTextEscaper.Escape(@"C:\work at 10:30")
-            .ShouldBe(@"C\\:\\\\work at 10\\:30");
+            .ShouldBe(@"C\\:\\\\\\\\work at 10\\:30");
     }
 
     [Fact]
