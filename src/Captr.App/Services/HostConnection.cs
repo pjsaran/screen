@@ -22,8 +22,27 @@ public sealed class HostConnection : IAsyncDisposable
 
     public HostConnection(string clientVersion) => _clientVersion = clientVersion;
 
-    /// <summary>The most recent status from the host ("idle" when none runs).</summary>
+    /// <summary>The most recent status from the host ("idle" when none runs), as it
+    /// should be SHOWN - see <see cref="StatusPresentation"/>.</summary>
     public StatusResponse LatestStatus { get; private set; } = IdleStatus;
+
+    // Remembers a failed ending, and whether it was acknowledged. Touched only on
+    // the poll loop's thread or, for Dismiss, under the same lock.
+    private readonly StatusPresentation.Tracker _presentation = new();
+    private readonly Lock _presentationLock = new();
+
+    /// <summary>Acknowledges the failure currently shown, so every view returns to idle.</summary>
+    public void DismissFailure()
+    {
+        StatusResponse shown;
+        lock (_presentationLock)
+        {
+            shown = _presentation.Dismiss();
+        }
+
+        LatestStatus = shown;
+        StatusChanged?.Invoke(shown);
+    }
 
     /// <summary>Raised on the thread pool after every poll; subscribers marshal to
     /// the dispatcher themselves.</summary>
@@ -43,17 +62,31 @@ public sealed class HostConnection : IAsyncDisposable
                     _clientVersion, startHostIfNeeded: false, null, cancellationToken).ConfigureAwait(false);
                 if (client is not null)
                 {
-                    status = await client.RequestAsync<StatusResponse>(IpcKinds.Status, null, cancellationToken)
+                    // Bounded: a recorder that stopped answering must not freeze
+                    // every view on its last status for ever.
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                    status = await client.RequestAsync<StatusResponse>(IpcKinds.Status, null, timeout.Token)
                         .ConfigureAwait(false);
                 }
             }
-            catch (Exception exception) when (exception is IpcRequestException or HostUnreachableException or IOException)
-            {
-                // The host went away between connect and request — idle it is.
-            }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return;
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // The host went away, answered garbage, speaks another protocol
+                // version, or took too long: shown as idle, and polled again in a
+                // second. Only four exception types were caught before; any other
+                // ended this loop for good, and the window and tray showed a stale
+                // state for the rest of the session with nothing logged.
+                System.Diagnostics.Trace.TraceWarning("Status poll failed: " + exception.Message);
+            }
+
+            lock (_presentationLock)
+            {
+                status = _presentation.Present(status);
             }
 
             LatestStatus = status;

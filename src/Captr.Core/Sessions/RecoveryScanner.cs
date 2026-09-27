@@ -87,6 +87,13 @@ public sealed class RecoveryScanner
     /// count as running. The heartbeat is written every second.</summary>
     internal static readonly TimeSpan LiveHeartbeatWindow = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// True while a recorder is still writing this session: its heartbeat is fresh and
+    /// the process that wrote it is alive. Used to refuse deleting a recording out from
+    /// under the encoder.
+    /// </summary>
+    public static bool IsBeingRecorded(string sessionFolder) => IsLive(sessionFolder, inUse: null);
+
     private static bool IsLive(string sessionFolder, IReadOnlyCollection<string>? inUse)
     {
         string full = Path.GetFullPath(sessionFolder).TrimEnd(Path.DirectorySeparatorChar);

@@ -173,7 +173,7 @@ public partial class MainWindow : IDisposable
             "recording" => ("Recording", $"Elapsed {status.Elapsed:hh\\:mm\\:ss}", "SystemFillColorCriticalBrush"),
             "paused" => ("Paused", "Resume when ready", "SystemFillColorCautionBrush"),
             "stopping" or "finalizing" => ("Finalising", "Writing the final file", "SystemFillColorCautionBrush"),
-            "failed" => ("Failed", "Stopped after repeated errors", "SystemFillColorCriticalBrush"),
+            "failed" => ("Stopped", "Needs attention — see Home", "SystemFillColorCriticalBrush"),
             _ => ("Idle", "Nothing is recording", "TextFillColorTertiaryBrush"),
         };
 

@@ -24,10 +24,22 @@ public partial class App : Application
     private HostConnection? _host;
     private HotkeyManager? _hotkeys;
 
+    // When the last unexpected-error message was shown, so a failure repeating on
+    // every tick produces one message, not a stack of them.
+    private DateTimeOffset _lastErrorShown = DateTimeOffset.MinValue;
+
     /// <inheritdoc />
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // There was no handler at all: an unexpected exception in any button, page,
+        // or timer ended the window silently - no report, no message, sometimes a
+        // ghost tray icon. Now it is written to a crash report and the person is told,
+        // once, in words; the window carries on. A recording is never affected either
+        // way: it belongs to the recorder process, not to this window.
+        Core.Diagnostics.CrashReporter.Install("ui");
+        DispatcherUnhandledException += OnUnexpectedError;
 
         // Single UI instance (SPEC §9): the second launch signals the first and exits.
         _singleInstance = new Mutex(initiallyOwned: true, @"Local\CaptrUi", out bool isFirst);
@@ -94,6 +106,26 @@ public partial class App : Application
                 string.Join(Environment.NewLine, _hotkeys.Conflicts),
                 "Hotkey conflicts", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+    }
+
+    private void OnUnexpectedError(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        string? report = Core.Diagnostics.CrashReporter.Write("ui", e.Exception, "The window continued.");
+        e.Handled = true;
+
+        if (DateTimeOffset.UtcNow - _lastErrorShown < TimeSpan.FromMinutes(1))
+        {
+            return;
+        }
+
+        _lastErrorShown = DateTimeOffset.UtcNow;
+        MessageBox.Show(
+            "Captr's window hit an unexpected problem: " + e.Exception.Message + Environment.NewLine + Environment.NewLine +
+            "Any recording carries on - it runs separately from this window. If something on screen looks wrong, " +
+            "close Captr from the tray and open it again." +
+            (report is null ? "" : Environment.NewLine + Environment.NewLine + "Details were saved to " + report +
+                " (Diagnostics > Export a support bundle includes it)."),
+            "Captr", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     /// <inheritdoc />

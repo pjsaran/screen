@@ -101,4 +101,17 @@ public sealed class RecoveryOfLiveSessionsTests : IDisposable
 
         reports.Select(r => r.SessionFolder).ShouldContain(orphaned);
     }
+
+    [Fact]
+    public void Only_a_recording_still_being_made_is_protected_from_deletion()
+    {
+        // The Recordings page asks this before deleting: deleting a live session
+        // pulled the folder out from under the encoder and faulted the recording.
+        RecoveryScanner.IsBeingRecorded(UnfinalisedSession("live", DateTimeOffset.UtcNow, Environment.ProcessId))
+            .ShouldBeTrue();
+        RecoveryScanner.IsBeingRecorded(UnfinalisedSession("crashed", DateTimeOffset.UtcNow.AddMinutes(-5), Environment.ProcessId))
+            .ShouldBeFalse();
+        RecoveryScanner.IsBeingRecorded(UnfinalisedSession("orphaned", DateTimeOffset.UtcNow, hostProcessId: 999_999_999))
+            .ShouldBeFalse();
+    }
 }

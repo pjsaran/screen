@@ -9,5 +9,9 @@ namespace Captr.Cli;
 /// </summary>
 public static class Program
 {
-    public static Task<int> Main(string[] args) => CliApplication.RunAsync(args);
+    public static Task<int> Main(string[] args)
+    {
+        Captr.Core.Diagnostics.CrashReporter.Install("cli");
+        return CliApplication.RunAsync(args);
+    }
 }

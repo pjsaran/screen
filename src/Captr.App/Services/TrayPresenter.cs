@@ -47,6 +47,9 @@ public sealed class TrayPresenter : IDisposable
 
     private bool _blinkOn = true;
 
+    // The failed session already announced, so the balloon appears once per failure.
+    private Guid? _announcedFailure;
+
     public TrayPresenter(TaskbarIcon icon)
     {
         _icon = icon;
@@ -81,6 +84,12 @@ public sealed class TrayPresenter : IDisposable
 
             case "failed":
                 StopBlinking(_error);
+                if (status.SessionId != _announcedFailure)
+                {
+                    _announcedFailure = status.SessionId;
+                    Notify("Captr stopped recording", StatusPresentation.DescribeFailure(status));
+                }
+
                 break;
 
             default:
@@ -123,7 +132,7 @@ public sealed class TrayPresenter : IDisposable
             "recording" => $"Recording {status.Elapsed:hh\\:mm\\:ss}",
             "paused" => $"PAUSED at {status.Elapsed:hh\\:mm\\:ss} — resume when ready",
             "stopping" or "finalizing" => "Finalising the recording",
-            "failed" => "Stopped after repeated encoder failures",
+            "failed" => "RECORDING STOPPED — open Captr to see why",
             _ => status.State,
         };
 

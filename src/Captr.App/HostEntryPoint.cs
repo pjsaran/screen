@@ -26,6 +26,10 @@ public static class HostEntryPoint
             ? info.InformationalVersion
             : "unknown";
 
+        // Anything nothing else handled leaves a report in the logs folder instead of
+        // the recorder simply vanishing.
+        Core.Diagnostics.CrashReporter.Install("host");
+
         // The host is a console-less async program; blocking the main thread here
         // is the entry point, where synchronous waiting is explicitly permitted
         // (SPEC §12: "no synchronous blocking … OUTSIDE the entry point").

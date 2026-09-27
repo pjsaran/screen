@@ -312,8 +312,28 @@ public sealed partial class RecordingsViewModel : ObservableObject, IDisposable
     /// confirmation (SPEC §7: explicit typed confirmation, always).</summary>
     public async Task DeleteConfirmedAsync(RecordingRow row)
     {
-        await Task.Run(() => Directory.Delete(row.Folder, recursive: true));
-        Recordings.Remove(row);
+        // Deleting a recording while it records took the folder out from under the
+        // encoder - FFmpeg failed, the session faulted, and the delete itself threw
+        // from an async void handler with nothing shown. Now: refused while live, and
+        // any file still held open is reported on the row, in words.
+        if (RecoveryScanner.IsBeingRecorded(row.Folder))
+        {
+            row.ActionResult = "This recording is still being made. Stop it first, then delete it.";
+            row.ActionIsError = true;
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() => Directory.Delete(row.Folder, recursive: true));
+            Recordings.Remove(row);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            row.ActionResult = "Could not delete it: " + exception.Message +
+                " Close anything that has one of its files open (a video player, Explorer's preview) and try again.";
+            row.ActionIsError = true;
+        }
     }
 
     public void Dispose() => StopWatching();

@@ -38,6 +38,10 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _stateText = "Idle";
 
+    /// <summary>The last recording ended on its own and nobody has acknowledged it yet.</summary>
+    [ObservableProperty]
+    private bool _isFailed;
+
     [ObservableProperty]
     private string _elapsedText = "";
 
@@ -108,6 +112,7 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
         IsRecording = status.State is "recording" or "paused" or "stopping" or "finalizing";
         IsPaused = status.State == "paused";
         CanPause = status.State == "recording";
+        IsFailed = status.State == StatusPresentation.Failed;
 
         (StateText, string brushKey) = status.State switch
         {
@@ -115,7 +120,7 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
             "recording" => ("Recording", "SystemFillColorCriticalBrush"),
             "paused" => ("Paused", "SystemFillColorCautionBrush"),
             "stopping" or "finalizing" => ("Finalising", "SystemFillColorCautionBrush"),
-            "failed" => ("Stopped after repeated failures", "SystemFillColorCriticalBrush"),
+            "failed" => ("Recording stopped", "SystemFillColorCriticalBrush"),
             _ => (status.State, "TextFillColorPrimaryBrush"),
         };
         StateBrush = Application.Current?.TryFindResource(brushKey) as Brush ?? StateBrush;
@@ -127,7 +132,7 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
             "idle" => "Press Start to begin recording every included display.",
             "paused" => "The pause is recorded as a gap. Resume when you are ready.",
             "stopping" or "finalizing" => "Writing the final file — this is safe to leave running.",
-            "failed" => "Everything recorded before the failure was finalised and kept.",
+            "failed" => StatusPresentation.DescribeFailure(status),
             _ => status.WorkingFolder is null ? "" : "Writing to " + status.WorkingFolder,
         };
 
@@ -193,6 +198,10 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
             return response.Message;
         });
     }
+
+    /// <summary>Acknowledges a failed recording; the page returns to idle.</summary>
+    [RelayCommand]
+    private void DismissFailure() => _host.DismissFailure();
 
     [RelayCommand]
     private Task PauseAsync() => RunSimpleAsync(IpcKinds.Pause);

@@ -60,7 +60,14 @@
                                FontFamily="{StaticResource MonoFont}" Margin="20,6,0,0"
                                Visibility="{Binding ElapsedText, Converter={StaticResource NonEmptyToVisibility}}" />
 
-                    <TextBlock Text="{Binding DetailText}" Style="{StaticResource CaptionText}" Margin="20,4,0,0" />
+                    <TextBlock Text="{Binding DetailText}" Style="{StaticResource CaptionText}" Margin="20,4,0,0"
+                               TextWrapping="Wrap" AutomationProperties.LiveSetting="Assertive" />
+
+                    <!-- A failure stays on screen until it is acknowledged, so it cannot
+                         be missed by looking away for the second it lasted. -->
+                    <ui:Button Content="Dismiss" Margin="20,10,0,0" Command="{Binding DismissFailureCommand}"
+                               AutomationProperties.Name="Dismiss the recording failure"
+                               Visibility="{Binding IsFailed, Converter={StaticResource BoolToVisibility}}" />
                 </StackPanel>
             </Grid>
         </Border>
