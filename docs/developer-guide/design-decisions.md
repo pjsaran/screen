@@ -375,3 +375,97 @@ would hide the one that lies.
   character halfway through (§1, §6). The capture method is chosen once, at start,
   by proving it — see "Screen capture falls back to GDI when Desktop Duplication
   cannot start" above.
+
+## Decisions added in the release-readiness work
+
+**A settings file from a newer Captr is kept aside, and defaults are used.** SPEC §8
+migrates settings forward only, so after a downgrade the older Captr cannot read
+what the newer one wrote. It used to throw — before the recorder opened its pipe
+and before the window could show anything, so neither started. Now the file is
+copied, untouched, to `settings.json.from-schema-<N>` (a name no save ever writes),
+the defaults are used, and `LoadProblem` says where the file went, on Diagnostics,
+in `captr doctor`, and on the Settings page. That is what the installer's downgrade
+warning already promised ("Captr would then start from defaults"), and nothing the
+user configured is lost: upgrading again and copying the file back restores every
+field. Silently dropping the fields the older version does not know was the
+alternative, and it cannot be undone.
+
+**Validation rules added after release never block a recording.** SPEC §8 says
+recording refuses to start while any settings rule fails. Two groups of rules
+arrived after release — where a destination folder may be (a full path, no stream
+colon, no `..`, no device prefix; a SharePoint folder inside the library) and the
+hotkey rules (Ctrl, Alt or Win unless F1–F24; the two must differ). A settings
+file that recorded yesterday must record today: an upgrade that stops someone
+recording over a destination path or a hotkey would fail the product's first
+priority for a problem unrelated to capture. So those errors carry
+`BlocksRecording = false`: the planner ignores them, but any save is refused until
+they are fixed, Diagnostics reports them, a transfer to a misplaced folder fails
+with the same words rather than writing somewhere unexpected, and a bad hotkey is
+simply not registered, with the reason shown. Every rule that existed at release
+still blocks.
+
+**The command line goes on the installing user's PATH, even for a per-machine
+install.** SPEC §11 asks for `captr` on PATH without duplicates and removed on
+uninstall. The entry is written to `HKCU\Environment`, never the machine PATH: the
+person running setup is the one who wants `captr` in their terminal, a user entry
+needs no elevation to add or to remove, and an uninstall run by that person can
+always take it back out. The installer announces the change (`ChangesEnvironment`),
+so a new terminal finds it without signing out. The cost is that other accounts on
+a per-machine install do not get `captr` on their PATH; they, and scheduled tasks,
+can use the full path `C:\Program Files\Captr\captr.exe`, which the scheduling
+guide recommends anyway.
+
+**Each recording's own folder is private; the working folder the user chose keeps
+its permissions.** Session folders used to inherit whatever their parent allowed,
+and under a drive root such as `D:\Recordings` that is "Authenticated Users:
+Modify" — every account could watch, alter, or delete recordings, and plant a
+journal, integrity record, or segment that the recorder would trust and pass to
+FFmpeg. The folder Captr creates for one recording now gets a protected ACL: the
+user, SYSTEM, and Administrators. The working folder itself, and any folder that
+already exists, are left alone: the person may have shared that folder
+deliberately (a team share, a folder a backup agent reads), and rewriting the
+permissions of a folder Captr did not create would be Captr overriding a choice
+that is not its to make. Where Windows will not apply the ACL (some network
+shares), the folder is created as before, because a recording must never be
+refused over it.
+
+**Versions are plain `MAJOR.MINOR.PATCH`; pre-release suffixes are refused.**
+`set-version.ps1` used to accept `0.2.0-beta.1`, after which every build failed:
+.NET's assembly and file versions and Inno Setup's `VersionInfoVersion` must be
+numeric (CS7034). Mapping a suffix onto a fourth version component was rejected —
+it would make the installer's upgrade and downgrade comparison depend on an
+encoding nobody can read off the file name. A trial build is a normal version
+number published as a draft (`new-release.ps1 -Draft`) or a rehearsal
+(`-SkipPublish`).
+
+**The support bundle replaces who and where with placeholders, by default.** SPEC §9
+requires no video and no secrets. A bundle is also, almost always, sent outside the
+team that owns the machine — and the Windows user name, the PC name, the profile
+path, the SharePoint tenant and app ids, the site host, and file-server names are
+personal or organisational data that diagnosing a recording problem rarely needs.
+They are replaced by `<user>`, `<pc>`, `%USERPROFILE%`, `<tenant-id>`,
+`<client-id>`, `<sharepoint-host>`, and `<server>` (whole words, longest first), and
+the bundle's `README.txt` and the window both say so. There is no switch to leave
+them in; a support engineer who needs one of them can ask for it.
+
+**A relocated data root gives the window its own single-instance names too.**
+`CAPTR_DATA_ROOT` relocates settings, logs, the queue, and caches, and suffixes the
+recorder's pipe and mutex so a relocated Captr has a recorder of its own. The
+window's single-instance mutex and focus signal carry the same suffix. Without it,
+a relocated window started while the user's own Captr was open would find that
+instance, hand it focus, and exit — so the installer tests' "the window opens on
+first run" would have been answered by the developer's own window. The variable
+grants nothing: it only moves where the same user's own files go.
+
+**SharePoint uploads are verified by size only.** SPEC §7 asks a SharePoint upload
+to "verify the returned size before marking complete", and that is exactly — and
+only — what it gets: the size Graph reports for the finished item must equal the
+local file's. A folder copy, by contrast, is read back and compared by SHA-256.
+This is recorded not as a departure from the spec but because the two paths give
+different assurance. Graph's own content hash for OneDrive and SharePoint is
+`quickXorHash`, which Captr does not implement, and an implementation cannot be
+validated without a real tenant to compare its results against; a hash check that
+has never been proven right would be worse than an honest size check, because it
+would fail real uploads or pass broken ones with false confidence. It remains open
+work, to be done with a tenant; until then the release-verification runbook checks
+sizes on a real library.
