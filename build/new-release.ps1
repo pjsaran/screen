@@ -153,7 +153,12 @@ try {
     $tag = "v$releaseVersion"
     Write-Host "Releasing $tag"
 
-    if ((& git tag --list $tag)) {
+    # Asked of the remote too, not only this clone: a tag pushed from another machine
+    # was invisible here, the build ran to the end, and the push was then refused.
+    $remoteTag = if (-not $SkipPublish -and (& git remote) -contains 'origin') {
+        & git ls-remote --tags origin "refs/tags/$tag" 2>$null
+    }
+    if ((& git tag --list $tag) -or $remoteTag) {
         throw "$tag already exists. Bump the version first: pwsh build/set-version.ps1 -Bump patch"
     }
 

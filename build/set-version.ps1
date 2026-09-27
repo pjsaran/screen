@@ -20,9 +20,9 @@
     anything is built is a commit that might not compile.
 
 .PARAMETER Version
-    The new version, as MAJOR.MINOR.PATCH (e.g. 0.2.0). Optional pre-release and
-    build suffixes are accepted (0.2.0-beta.1), because the .NET SDK and Inno Setup
-    both handle them.
+    The new version, as MAJOR.MINOR.PATCH (e.g. 0.2.0). Pre-release suffixes
+    (0.2.0-beta.1) are refused: the assembly, file and installer version resources
+    must be numeric, and a suffix made the next build fail.
 
 .PARAMETER Bump
     Instead of naming a version, raise one part of the current one: major, minor, or
@@ -85,10 +85,13 @@ if (-not $Version) {
     return
 }
 
-# MSBuild, NuGet, and Inno Setup all accept this shape; anything else fails much
-# later, in a message that does not mention the version.
-if ($Version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
-    throw "'$Version' is not a valid version. Use MAJOR.MINOR.PATCH, optionally with a -prerelease suffix."
+# Plain MAJOR.MINOR.PATCH only. A -prerelease suffix used to be accepted here, but
+# the assembly and file versions are "$(CaptrVersion).0" and must be numeric, so the
+# very next build failed with CS7034 - and Inno's VersionInfoVersion must be numeric
+# too. Refused here, where the message can say why.
+if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "'$Version' is not a valid version. Use MAJOR.MINOR.PATCH, for example 0.2.0. " +
+          "Pre-release suffixes such as -beta.1 are not supported: Windows file versions must be numeric."
 }
 
 if ($Version -eq $current) {

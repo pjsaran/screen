@@ -40,6 +40,16 @@ $artifactsDir = Join-Path $RepoRoot 'artifacts'
 $toolsInno = Join-Path $RepoRoot 'tools\innosetup'
 $iscc = Join-Path $toolsInno 'ISCC.exe'
 
+# The compiler's own files, as the pinned installer above puts them down. ISCC.exe
+# carries no version resource, so an Inno already sitting in tools\ - installed by
+# hand, or a different version - used to be trusted as it was. It now has to be
+# byte-for-byte the pinned one, because it compiles (and, with SignTool, signs)
+# what ships.
+$innoCompilerSha256 = @{
+    'ISCC.exe'    = '0a8757031b33777e4c9cbffee40f11a5062b36d25cbe144c1db73b6102b80ad7'
+    'ISCmplr.dll' = '85a1e3090d3a5b85319f001b7c8f9ecfad45f37eff030a67bbe29ef58b7aa2c3'
+}
+
 if (-not (Test-Path (Join-Path $publishDir 'Captr.App.exe'))) {
     throw "No published payload at $publishDir. Run: pwsh build/build.ps1 -Publish"
 }
@@ -82,6 +92,14 @@ $newerSource = Get-ChildItem (Join-Path $RepoRoot 'src') -Recurse -File `
     Sort-Object LastWriteTimeUtc -Descending |
     Select-Object -First 3
 
+# The repository-wide build files decide what is built too: a package bumped in
+# Directory.Packages.props, or a version bumped in Version.props, is a different
+# payload, and neither lives under src/.
+$newerSource = @($newerSource) + @(
+    'Version.props', 'Directory.Build.props', 'Directory.Packages.props' |
+        ForEach-Object { Get-Item (Join-Path $RepoRoot $_) -ErrorAction SilentlyContinue } |
+        Where-Object { $_ -and $_.LastWriteTimeUtc -gt $publishedStamp }) | Where-Object { $_ }
+
 if ($newerSource) {
     $names = ($newerSource | ForEach-Object { '  ' + $_.FullName.Substring($RepoRoot.Length + 1) }) -join "`n"
     throw ("The published payload in $publishDir was built at " +
@@ -108,8 +126,17 @@ if (-not (Test-Path $iscc)) {
     }
 
     Write-Host "Installing Inno Setup into $toolsInno (per-user, silent)"
-    Start-Process $installer -ArgumentList "/VERYSILENT", "/CURRENTUSER", "/DIR=`"$toolsInno`"", "/NOICONS" -Wait
+    $innoSetup = Start-Process $installer -ArgumentList "/VERYSILENT", "/CURRENTUSER", "/DIR=`"$toolsInno`"", "/NOICONS" -Wait -PassThru
+    if ($innoSetup.ExitCode -ne 0) { throw "The Inno Setup installer failed with exit code $($innoSetup.ExitCode)." }
     if (-not (Test-Path $iscc)) { throw "Inno Setup installation did not produce $iscc." }
+}
+
+foreach ($file in $innoCompilerSha256.Keys) {
+    $actualCompiler = (Get-FileHash (Join-Path $toolsInno $file) -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualCompiler -ne $innoCompilerSha256[$file]) {
+        throw ("$toolsInno\$file is not the pinned Inno Setup $innoVersion (SHA-256 $actualCompiler). " +
+               "Delete $toolsInno and run this again to install the pinned version.")
+    }
 }
 
 # --- 3. version.iss from the single version source --------------------------------

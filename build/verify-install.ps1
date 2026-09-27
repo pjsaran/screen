@@ -67,15 +67,26 @@ $work = Join-Path $stage 'work'
 $dest = Join-Path $stage 'dest'
 New-Item -ItemType Directory -Force $work, $dest | Out-Null
 
+# Everything below runs against a data root of its own, so the person's settings,
+# transfer queue and running recorder are never touched. This script used to edit
+# %APPDATA%\Captr\settings.json - not even where settings live - and never put
+# anything back, so a verification run left the real configuration pointing at a
+# deleted temp folder with a destination nobody asked for.
+$previousDataRoot = $env:CAPTR_DATA_ROOT
+$env:CAPTR_DATA_ROOT = Join-Path $stage 'data'
+
 Check 'short recording produces a playable, correctly-named, transferred file' {
     # Configure: temp working folder + a folder destination, then record ~15 s.
+    # Through the CLI's own export and import, so the file is written by Captr.
     & $cli settings set workingFolder $work | Out-Null
-    $settingsPath = Join-Path $env:APPDATA 'Captr\settings.json'
-    $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+    $settings = (& $cli settings export) -join "`n" | ConvertFrom-Json
     $settings | Add-Member -NotePropertyName destinations -NotePropertyValue @(
         [ordered]@{ name = 'verify'; kind = 'folder'; enabled = $true; folderPath = $dest }
     ) -Force
-    $settings | ConvertTo-Json -Depth 6 | Set-Content $settingsPath
+    $settingsFile = Join-Path $stage 'verify-settings.json'
+    $settings | ConvertTo-Json -Depth 6 | Set-Content $settingsFile
+    & $cli settings import $settingsFile | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "settings import failed with $LASTEXITCODE" }
 
     $startOut = & $cli start --label verify 2>&1
     Write-Host "      start: [$LASTEXITCODE] $startOut"
@@ -104,6 +115,8 @@ Check 'short recording produces a playable, correctly-named, transferred file' {
     if ($LASTEXITCODE -ne 0) { throw 'transferred file does not probe' }
     Write-Host "      transferred: $($transferred.Name)  probe: $($probe -join ' ')"
 }
+
+$env:CAPTR_DATA_ROOT = $previousDataRoot
 
 if ($failures.Count -gt 0) {
     throw "Post-install verification FAILED: $($failures -join ', ')"
