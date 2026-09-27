@@ -65,6 +65,9 @@ UninstallDisplayIcon={app}\Captr.App.exe
 CloseApplications=yes
 RestartApplications=no
 WizardStyle=modern
+; Tell running programs (Explorer above all) that the user PATH changed, so a new
+; terminal opened from the Start menu finds 'captr' without signing out first.
+ChangesEnvironment=yes
 #ifdef CaptrSign
 ; Defined by make-installer.ps1 only when a signing method is configured: Inno then
 ; runs build/Sign-Artifacts.ps1 ("captrsign", passed with /S) on setup itself AND on
@@ -177,23 +180,45 @@ begin
   end;
 end;
 
-function RecorderState(var ExitCode: Integer): Boolean;
+// ---- Running the installed CLI: always AS THE ORIGINAL USER ------------------
+// Never plain Exec. A per-machine setup runs elevated, and the path above comes
+// from the uninstall key - which is looked up in HKCU first, a place any program
+// the user runs can write. Exec'ing it elevated would hand administrator rights to
+// whatever captr.exe that key names (a per-user install, or a planted one).
+// ExecAsOriginalUser runs it with the same rights as the person who started setup,
+// which is also the only account whose recorder the CLI can see: the recorder's
+// pipe is per user, so an elevated or different administrator account would ask
+// the wrong recorder "are you recording?" and be told "no".
+function RunInstalledCli(Params: string; var ExitCode: Integer): Boolean;
 var
   Cli: string;
 begin
   Cli := InstalledCliPath();
   Result := (Cli <> '') and
-            Exec(Cli, 'status', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+            ExecAsOriginalUser(Cli, Params, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+end;
+
+function RecorderState(var ExitCode: Integer): Boolean;
+begin
+  Result := RunInstalledCli('status', ExitCode);
+end;
+
+// Messages that must never block an unattended install. In a silent install
+// nobody can press OK - a message box, even a "suppressible" one without
+// /SUPPRESSMSGBOXES, waits for ever - so it goes to the setup log instead.
+procedure Tell(Text: string; Kind: TMsgBoxType);
+begin
+  Log(Text);
+  if not WizardSilent() then
+    MsgBox(Text, Kind, MB_OK);
 end;
 
 function TryStopRecording(): Boolean;
 var
-  Cli: string;
   ExitCode: Integer;
   Attempt: Integer;
 begin
-  Cli := InstalledCliPath();
-  Exec(Cli, 'stop', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  RunInstalledCli('stop', ExitCode);
   // Finalisation runs in the background; poll status until idle (max ~2 min).
   for Attempt := 1 to 60 do begin
     Sleep(2000);
@@ -245,9 +270,11 @@ end;
 // what is about to happen: reinstalling the same version, moving up, or moving down
 // are three quite different things and used to be indistinguishable.
 //
-// Silent installs keep working: SuppressibleMsgBox returns the default answer given
-// here, so /VERYSILENT reinstalls and upgrades proceed and a downgrade still needs
-// /ALLOWDOWNGRADE=yes.
+// Silent installs never ask. SuppressibleMsgBox only answers by itself when
+// /SUPPRESSMSGBOXES is ALSO given, so a plain /VERYSILENT upgrade - what Intune,
+// SCCM, and PDQ run, often with nobody logged on - used to wait for ever on an
+// invisible "Upgrade now?" box. Silently, a reinstall or an upgrade proceeds, and a
+// downgrade is refused (logged; setup exits with code 1) unless /ALLOWDOWNGRADE=yes.
 function ConfirmAgainstInstalledVersion(): Boolean;
 var
   Existing: string;
@@ -260,6 +287,16 @@ begin
   end;
 
   Order := CompareVersions('{#CaptrVersion}', Existing);
+
+  if WizardSilent() then begin
+    Result := (Order >= 0) or (ExpandConstant('{param:ALLOWDOWNGRADE|no}') = 'yes');
+    if Result then
+      Log('Existing Captr ' + Existing + ' found; installing ' + '{#CaptrVersion}' + ' over it.')
+    else
+      Log('Refusing to downgrade Captr ' + Existing + ' to ' + '{#CaptrVersion}' +
+          ' without /ALLOWDOWNGRADE=yes.');
+    exit;
+  end;
 
   if Order = 0 then begin
     Result := SuppressibleMsgBox(
@@ -306,14 +343,12 @@ begin
   if RecorderState(ExitCode) and ((ExitCode = 0) or (ExitCode = 11)) then begin
     if ExpandConstant('{param:FORCESTOP|no}') = 'yes' then begin
       if not TryStopRecording() then begin
-        SuppressibleMsgBox('A recording was in progress and could not be stopped cleanly. Setup cannot continue.',
-          mbCriticalError, MB_OK, IDOK);
+        Tell('A recording was in progress and could not be stopped cleanly. Setup cannot continue.', mbCriticalError);
         Result := False;
         exit;
       end;
     end else begin
-      SuppressibleMsgBox('A recording is in progress. Finish it first, or re-run setup with /FORCESTOP=yes to stop and finalise it automatically.',
-        mbError, MB_OK, IDOK);
+      Tell('A recording is in progress. Finish it first, or re-run setup with /FORCESTOP=yes to stop and finalise it automatically.', mbError);
       Result := False;
       exit;
     end;
@@ -322,16 +357,74 @@ begin
   Result := ConfirmAgainstInstalledVersion();
 end;
 
+// ---- Closing Captr before its files are replaced -------------------------------
+// True while ANY Captr.App.exe is running on the machine, whoever it belongs to.
+// Image names are visible to every account, so this works without elevation.
+function CaptrIsRunning(): Boolean;
+var
+  Listing: string;
+  Output: AnsiString;
+  ExitCode: Integer;
+begin
+  Listing := ExpandConstant('{tmp}\captr-processes.txt');
+  Exec(ExpandConstant('{cmd}'), '/C ' + AddQuotes(ExpandConstant('{sys}\tasklist.exe')) +
+       ' /FI "IMAGENAME eq Captr.App.exe" /NH > ' + AddQuotes(Listing),
+       '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  Result := LoadStringFromFile(Listing, Output) and (Pos('Captr.App.exe', String(Output)) > 0);
+end;
+
+// Close the installing user's own Captr (window and idle host) - AS that user, so it
+// can close nothing that belongs to anybody else. The old blanket, elevated
+// "taskkill /F /IM Captr.App.exe" ended every account's recorder on the machine,
+// including recordings the "are you recording?" check had no way to see.
+//
+// Whatever is still running afterwards belongs to another account. Setup stops and
+// says so, unless /FORCESTOP=yes - then it is closed too, and any recording it was
+// making is recovered the next time that person starts Captr (the encoder keeps
+// writing until then; nothing already recorded is lost).
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExitCode: Integer;
+begin
+  Result := '';
+  ExecAsOriginalUser(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Captr.App.exe', '', SW_HIDE,
+    ewWaitUntilTerminated, ExitCode);
+  Sleep(500);
+
+  if not CaptrIsRunning() then
+    exit;
+
+  if ExpandConstant('{param:FORCESTOP|no}') = 'yes' then begin
+    Log('Captr is running for another account; closing it because /FORCESTOP=yes was given.');
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Captr.App.exe', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+    exit;
+  end;
+
+  Result := 'Captr is running for another account on this PC, and it may be recording. ' +
+            'Ask them to quit it (tray icon, Quit), or run setup again with /FORCESTOP=yes to close it; ' +
+            'any recording it was making is recovered the next time they start Captr.';
+  Log(Result);
+end;
+
+// "D:\Rec\" inside double quotes ends in \" - which the command-line parser reads as
+// an escaped quote, turning the value into  D:\Rec"  and swallowing everything after
+// it. Doubling the trailing backslashes keeps them backslashes.
+function QuoteArgument(Value: string): string;
+var
+  Trailing: string;
+begin
+  Trailing := '';
+  while (Length(Value) > Length(Trailing)) and (Value[Length(Value) - Length(Trailing)] = '\') do
+    Trailing := Trailing + '\';
+  Result := '"' + Value + Trailing + '"';
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ExitCode: Integer;
   WorkingFolder: string;
   Params: string;
 begin
-  if CurStep = ssInstall then begin
-    // End the idle host so files are replaceable (recorder is idle here).
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Captr.App.exe', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
-  end;
 
   if CurStep = ssPostInstall then begin
     // Give a fresh machine a real settings.json instead of nothing until the user
@@ -352,10 +445,12 @@ begin
     // (other users keep defaults; documented in docs/user-guide/installation.md).
     WorkingFolder := ExpandConstant('{param:WORKINGFOLDER|}');
     if WorkingFolder <> '' then
-      Params := Params + ' --working-folder "' + WorkingFolder + '"';
+      Params := Params + ' --working-folder ' + QuoteArgument(WorkingFolder);
 
-    ExecAsOriginalUser(ExpandConstant('{app}\captr.exe'), Params, ExpandConstant('{app}'),
-      SW_HIDE, ewWaitUntilTerminated, ExitCode);
+    if not ExecAsOriginalUser(ExpandConstant('{app}\captr.exe'), Params, ExpandConstant('{app}'),
+             SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
+      Log('captr settings init did not complete (exit code ' + IntToStr(ExitCode) + '); Captr creates its ' +
+          'settings on first use instead. A /WORKINGFOLDER preset may not have been applied.');
   end;
 end;
 
@@ -453,6 +548,43 @@ begin
           'Control Panel\NotifyIconSettings\' + Names[I]);
     end;
   end;
+end;
+
+// ---- Uninstall: never under a running recording --------------------------------
+// Setup refuses while recording; the uninstaller did not, and removed files from
+// under a live recorder (and could delete its session folder, if the user chose to).
+// The recorder is asked as the account running the uninstaller: ExecAsOriginalUser
+// is not available at uninstall time.
+function InitializeUninstall(): Boolean;
+var
+  Cli: string;
+  ExitCode: Integer;
+  Attempt: Integer;
+begin
+  Result := True;
+  Cli := ExpandConstant('{app}\captr.exe');
+  if not (FileExists(Cli) and Exec(Cli, 'status', '', SW_HIDE, ewWaitUntilTerminated, ExitCode)
+          and ((ExitCode = 0) or (ExitCode = 11))) then
+    exit;
+
+  if ExpandConstant('{param:FORCESTOP|no}') <> 'yes' then begin
+    Log('A recording is in progress; refusing to uninstall without /FORCESTOP=yes.');
+    if not UninstallSilent() then
+      MsgBox('A recording is in progress. Stop it first (or run the uninstaller with /FORCESTOP=yes ' +
+             'to stop and save it automatically), then uninstall.', mbError, MB_OK);
+    Result := False;
+    exit;
+  end;
+
+  Exec(Cli, 'stop', '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  for Attempt := 1 to 60 do begin
+    Sleep(2000);
+    if Exec(Cli, 'status', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) and (ExitCode = 10) then
+      exit;
+  end;
+
+  Log('The recording could not be stopped cleanly; refusing to uninstall.');
+  Result := False;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
