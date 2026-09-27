@@ -15,6 +15,19 @@ public class SettingsValidatorTests
     }
 
     [Theory]
+    [InlineData(3650, true)]
+    [InlineData(3651, false)]
+    [InlineData(20_000_000, false)]
+    public void Retention_is_bounded_so_it_can_never_overflow_the_cleanup_arithmetic(int days, bool accepted)
+    {
+        // 20000000 used to pass and then overflow TimeSpan at the next host start -
+        // before the host opened its pipe, so every start timed out until changed.
+        IReadOnlyList<SettingsError> errors = SettingsValidator.Validate(Valid with { RetentionDays = days });
+
+        errors.Any(e => e.Field == nameof(CaptrSettings.RetentionDays)).ShouldBe(!accepted);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(-5)]
     [InlineData(61)]

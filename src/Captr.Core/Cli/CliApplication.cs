@@ -76,7 +76,47 @@ public static class CliApplication
             return ExitCodes.Usage;
         }
 
-        return await parseResult.InvokeAsync();
+        // System.CommandLine's own handler prints a stack trace and exits 1 - on a
+        // scheduled task's history, or to a script parsing --json, that is noise with
+        // no next step. Every command's expected failures are mapped where they
+        // happen; this catches the rest, says what failed in one line, keeps the
+        // details in the log folder, and keeps the documented exit codes.
+        try
+        {
+            return await parseResult.InvokeAsync(new InvocationConfiguration { EnableDefaultExceptionHandler = false });
+        }
+        catch (HostUnreachableException exception)
+        {
+            await Console.Error.WriteLineAsync(exception.Message);
+            return ExitCodes.HostUnreachable;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            string? details = WriteErrorDetails(args, exception);
+            await Console.Error.WriteLineAsync(
+                $"captr {string.Join(' ', args.Take(2))} failed: {exception.Message}" +
+                (details is null ? "" : $" (details: {details})"));
+            return ExitCodes.Error;
+        }
+    }
+
+    /// <summary>Keeps the full exception for whoever investigates, beside the host's
+    /// logs. Best effort: a failure to write it must not replace the real error.</summary>
+    private static string? WriteErrorDetails(string[] args, Exception exception)
+    {
+        try
+        {
+            Directory.CreateDirectory(Common.CaptrPaths.Logs);
+            string path = Path.Combine(Common.CaptrPaths.Logs, "cli-last-error.txt");
+            File.WriteAllText(path,
+                $"{DateTimeOffset.Now:O}{Environment.NewLine}captr {string.Join(' ', args)}{Environment.NewLine}{Environment.NewLine}" +
+                string.Join(Environment.NewLine, exception.ToString().Split(Environment.NewLine).Select(Diagnostics.SupportBundle.ScrubLine)));
+            return path;
+        }
+        catch (Exception writeFailure) when (writeFailure is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     // ---- start ------------------------------------------------------------------
@@ -96,7 +136,37 @@ public static class CliApplication
         {
             Description = "Speed preset override: " + string.Join(", ", SpeedPresets.All.Select(p => p.Name)) + ".",
         };
-        var labelOption = new Option<string?>("--label") { Description = "A label included in the output file name." };
+        var labelOption = new Option<string?>("--label")
+        {
+            Description = "A label for this recording, available to the naming pattern as {label}.",
+        };
+
+        // Documented as usage errors (exit 2). They used to be passed through to the
+        // recorder unchecked: --fps 0 surfaced as "no working encoder was found".
+        fpsOption.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<int?>() is { } fps && !CaptureRates.IsSupported(fps))
+            {
+                result.AddError($"--fps {fps} is not a supported frame rate. Use one of: " +
+                    string.Join(", ", CaptureRates.All.Select(r => r.FramesPerSecond)) + ".");
+            }
+        });
+        qualityOption.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<string?>() is { } quality && QualityLevels.Find(quality) is null)
+            {
+                result.AddError($"--quality {quality} is not a quality level. Use one of: " +
+                    string.Join(", ", QualityLevels.All.Select(q => q.Name)) + ".");
+            }
+        });
+        presetOption.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<string?>() is { } preset && SpeedPresets.Find(preset) is null)
+            {
+                result.AddError($"--preset {preset} is not a speed preset. Use one of: " +
+                    string.Join(", ", SpeedPresets.All.Select(p => p.Name)) + ".");
+            }
+        });
 
         var command = new Command("start", "Start recording. Succeeds (without starting twice) when already recording.");
         command.Options.Add(fpsOption);
@@ -287,6 +357,13 @@ public static class CliApplication
             bool json = parseResult.GetValue(jsonOption);
             string path = SettingsStore.DefaultSettingsPath();
 
+            // Load first: it moves an older Captr's roaming settings across and
+            // restores settings.json from its previous version if the file is gone.
+            // Checking only whether the file existed - which the installer runs on
+            // every install - used to write fresh defaults over both, after which
+            // neither recovery could ever happen.
+            new SettingsStore().Load();
+
             if (File.Exists(path))
             {
                 // Idempotent BY DESIGN: an upgrade re-runs this, and a user's
@@ -334,34 +411,11 @@ public static class CliApplication
             {
                 var store = new SettingsStore();
                 CaptrSettings updated = SettingsEditor.Apply(store.Load(), parseResult.GetValue(keyArgument)!, parseResult.GetValue(valueArgument)!);
-
-                // Route through the host WHEN ONE IS RUNNING so the capture/quality
-                // lock of SPEC §8 is enforced against the live session. With no host
-                // there is no recording, so writing directly is equivalent — and it
-                // keeps `captr settings set` working on a machine that has never
-                // recorded (no host is summoned just to change a setting).
-                await using IpcClient? client = await IpcClient.ConnectAsync(
-                    ClientVersion(), startHostIfNeeded: false, null, cancellationToken);
-                if (client is null)
-                {
-                    store.Save(updated);
-                    await Console.Out.WriteLineAsync("Saved.");
-                    return ExitCodes.Success;
-                }
-
-                SetSettingsResponse response = await client.RequestAsync<SetSettingsResponse>(
-                    IpcKinds.SetSettings, new SetSettingsRequest(updated), cancellationToken);
-                if (!response.Applied)
-                {
-                    await Console.Error.WriteLineAsync(response.Message);
-                    return ExitCodes.Error;
-                }
-
-                await Console.Out.WriteLineAsync(response.Message);
-                return ExitCodes.Success;
+                return await SaveThroughRecorderAsync(store, updated, "Saved.", cancellationToken);
             }
             catch (Exception exception) when (
-                exception is SettingsValidationException or ArgumentException or IpcRequestException or HostUnreachableException)
+                exception is SettingsValidationException or ArgumentException or IpcRequestException
+                    or HostUnreachableException or ProtocolMismatchException)
             {
                 await Console.Error.WriteLineAsync(exception.Message);
                 return ExitCodes.Error;
@@ -386,11 +440,27 @@ public static class CliApplication
             {
                 var store = new SettingsStore();
                 string json = await File.ReadAllTextAsync(parseResult.GetValue(fileArgument)!, cancellationToken);
-                store.Save(store.Import(json));
-                await Console.Out.WriteLineAsync("Imported and saved.");
-                return ExitCodes.Success;
+                CaptrSettings current = store.Load();
+                CaptrSettings imported = store.Import(json);
+
+                // Say what the import changes where recordings GO. A shared settings
+                // file can add a destination or move the working folder - and with
+                // it every future recording - so it must never do that unannounced.
+                // Then save it the way `set` does: through the recorder when one is
+                // running, so the while-recording lock applies (it used to bypass it,
+                // and moving the working folder mid-recording left an interrupted
+                // session where recovery would never look).
+                foreach (string change in SettingsEditor.DescribeWhereRecordingsGo(current, imported))
+                {
+                    await Console.Out.WriteLineAsync(change);
+                }
+
+                return await SaveThroughRecorderAsync(store, imported, "Imported and saved.", cancellationToken);
             }
-            catch (Exception exception) when (exception is SettingsValidationException or JsonException or IOException)
+            catch (Exception exception) when (exception is SettingsValidationException or JsonException or IOException
+                                                  or UnauthorizedAccessException or Settings.Migrations.SettingsMigrationException
+                                                  or IpcRequestException or HostUnreachableException or ProtocolMismatchException
+                                                  or NotSupportedException or InvalidOperationException)
             {
                 await Console.Error.WriteLineAsync(exception.Message);
                 return ExitCodes.Error;
@@ -685,6 +755,36 @@ public static class CliApplication
             await Console.Error.WriteLineAsync(exception.Message);
             return ExitCodes.Error;
         }
+    }
+
+    /// <summary>
+    /// Saves settings through the running recorder when there is one, so the SPEC §8
+    /// lock is enforced against the live session; with no recorder there is no
+    /// recording, and writing the file directly is equivalent (and no recorder is
+    /// started just to change a setting).
+    /// </summary>
+    private static async Task<int> SaveThroughRecorderAsync(
+        SettingsStore store, CaptrSettings updated, string doneMessage, CancellationToken cancellationToken)
+    {
+        await using IpcClient? client = await IpcClient.ConnectAsync(
+            ClientVersion(), startHostIfNeeded: false, null, cancellationToken);
+        if (client is null)
+        {
+            store.Save(updated);
+            await Console.Out.WriteLineAsync(doneMessage);
+            return ExitCodes.Success;
+        }
+
+        SetSettingsResponse response = await client.RequestAsync<SetSettingsResponse>(
+            IpcKinds.SetSettings, new SetSettingsRequest(updated), cancellationToken);
+        if (!response.Applied)
+        {
+            await Console.Error.WriteLineAsync(response.Message);
+            return ExitCodes.Error;
+        }
+
+        await Console.Out.WriteLineAsync(response.Message);
+        return ExitCodes.Success;
     }
 
     /// <summary>Results to stdout — JSON or human, never both (SPEC §10).</summary>

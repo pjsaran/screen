@@ -108,7 +108,7 @@ public sealed class RetentionCleaner
             return false;
         }
 
-        if (nowUtc - finalized.TimestampUtc < TimeSpan.FromDays(retentionDays))
+        if (nowUtc - finalized.TimestampUtc < TimeSpan.FromDays(Math.Min(retentionDays, SettingsValidator.MaxRetentionDays)))
         {
             reasonToKeep = $"inside the {retentionDays}-day retention period";
             return false;

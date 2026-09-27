@@ -12,6 +12,9 @@ namespace Captr.Core.Settings;
 /// </summary>
 public static class SettingsValidator
 {
+    /// <summary>The longest retention accepted: ten years.</summary>
+    public const int MaxRetentionDays = 3650;
+
     /// <summary>Validates and returns every problem found (not just the first —
     /// the settings page shows them all inline).</summary>
     public static IReadOnlyList<SettingsError> Validate(CaptrSettings settings)
@@ -47,6 +50,15 @@ public static class SettingsValidator
         {
             errors.Add(new(nameof(settings.WorkingFolder),
                 $"The working folder must be a full path like C:\\Recordings, not '{settings.WorkingFolder}'."));
+        }
+
+        if (settings.RetentionDays > MaxRetentionDays)
+        {
+            // Unbounded, a value like 20000000 passed here and then overflowed the
+            // retention arithmetic at the next host start - before the host opened
+            // its pipe, so every start timed out until the setting was changed.
+            errors.Add(new(nameof(settings.RetentionDays),
+                $"Retention can be at most {MaxRetentionDays} days (ten years)."));
         }
 
         if (settings.RetentionDays < 0)

@@ -11,6 +11,48 @@ namespace Captr.Core.Cli;
 /// </summary>
 public static class SettingsEditor
 {
+    /// <summary>
+    /// What changes between two sets of settings in WHERE RECORDINGS GO — the working
+    /// folder, and destinations added, removed, or re-pointed — as plain sentences.
+    /// Empty when nothing about that changes.
+    /// </summary>
+    public static IReadOnlyList<string> DescribeWhereRecordingsGo(CaptrSettings before, CaptrSettings after)
+    {
+        var changes = new List<string>();
+        if (!string.Equals(before.WorkingFolder, after.WorkingFolder, StringComparison.OrdinalIgnoreCase))
+        {
+            changes.Add($"Working folder: {before.WorkingFolder} -> {after.WorkingFolder}");
+        }
+
+        Dictionary<string, DestinationSettings> old = before.Destinations.ToDictionary(d => d.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (DestinationSettings destination in after.Destinations)
+        {
+            if (!old.TryGetValue(destination.Name, out DestinationSettings? previous))
+            {
+                changes.Add($"Destination added: {destination.Name} ({Target(destination)})");
+            }
+            else if (!string.Equals(Target(previous), Target(destination), StringComparison.OrdinalIgnoreCase))
+            {
+                changes.Add($"Destination changed: {destination.Name} ({Target(previous)} -> {Target(destination)})");
+            }
+        }
+
+        foreach (DestinationSettings removed in before.Destinations.Where(d =>
+                     !after.Destinations.Any(a => string.Equals(a.Name, d.Name, StringComparison.OrdinalIgnoreCase))))
+        {
+            changes.Add($"Destination removed: {removed.Name}");
+        }
+
+        return changes;
+
+        static string Target(DestinationSettings destination) => destination.Kind switch
+        {
+            DestinationKind.Folder => "folder " + destination.FolderPath,
+            DestinationKind.SharePoint => "SharePoint " + destination.SharePointSiteUrl + " " + destination.SharePointFolder,
+            _ => destination.Kind.ToString(),
+        };
+    }
+
     /// <summary>Applies one change and returns the updated settings (unsaved).</summary>
     public static CaptrSettings Apply(CaptrSettings settings, string key, string value)
     {
