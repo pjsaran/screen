@@ -109,7 +109,7 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
 
     private void Apply(StatusResponse status)
     {
-        IsRecording = status.State is "recording" or "paused" or "stopping" or "finalizing";
+        IsRecording = StatusPresentation.IsActive(status.State);
         IsPaused = status.State == "paused";
         CanPause = status.State == "recording";
         IsFailed = status.State == StatusPresentation.Failed;
@@ -117,21 +117,25 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
         (StateText, string brushKey) = status.State switch
         {
             "idle" => ("Idle", "TextFillColorPrimaryBrush"),
+            "starting" => ("Starting", "SystemFillColorCautionBrush"),
             "recording" => ("Recording", "SystemFillColorCriticalBrush"),
             "paused" => ("Paused", "SystemFillColorCautionBrush"),
-            "stopping" or "finalizing" => ("Finalising", "SystemFillColorCautionBrush"),
+            "suspended" => ("Suspended", "SystemFillColorCautionBrush"),
+            "stopping" or "finalizing" or "completed" => ("Finalising", "SystemFillColorCautionBrush"),
             "failed" => ("Recording stopped", "SystemFillColorCriticalBrush"),
             _ => (status.State, "TextFillColorPrimaryBrush"),
         };
         StateBrush = Application.Current?.TryFindResource(brushKey) as Brush ?? StateBrush;
 
-        ElapsedText = status.Elapsed is { } elapsed ? elapsed.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture) : "";
+        ElapsedText = StatusPresentation.FormatElapsed(status.Elapsed);
 
         DetailText = status.State switch
         {
             "idle" => "Press Start to begin recording every included display.",
+            "starting" => "Getting ready — the first recording on this PC checks which encoder works, which takes a few seconds.",
             "paused" => "The pause is recorded as a gap. Resume when you are ready.",
-            "stopping" or "finalizing" => "Writing the final file — this is safe to leave running.",
+            "suspended" => "The PC went to sleep. The time asleep is recorded as a gap, and recording carries on when it wakes.",
+            "stopping" or "finalizing" or "completed" => "Writing the final file — this is safe to leave running.",
             "failed" => StatusPresentation.DescribeFailure(status),
             _ => status.WorkingFolder is null ? "" : "Writing to " + status.WorkingFolder,
         };
@@ -163,7 +167,9 @@ public sealed partial class HomeViewModel : ObservableObject, IDisposable
         EncoderText = status.Encoder ?? "—";
         EncoderHint = status.Encoder is null
             ? ""
-            : status.Encoder.Contains("openh264", StringComparison.OrdinalIgnoreCase)
+            // The catalogue decides, not the name: libx264 leads the software tier and
+            // was labelled "Hardware accelerated" on every CPU-only machine.
+            : EncoderCatalog.IsSoftware(status.Encoder)
                 ? "Software — no GPU encoder worked"
                 : "Hardware accelerated";
 

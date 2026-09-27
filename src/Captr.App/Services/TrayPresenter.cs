@@ -74,11 +74,11 @@ public sealed class TrayPresenter : IDisposable
 
             // Finalising is not recording: the picture has stopped, so the icon
             // holds still while the file is written.
-            case "stopping" or "finalizing":
+            case "starting" or "stopping" or "finalizing" or "completed":
                 StopBlinking(_recording);
                 break;
 
-            case "paused":
+            case "paused" or "suspended":
                 StopBlinking(_paused);
                 break;
 
@@ -129,9 +129,11 @@ public sealed class TrayPresenter : IDisposable
 
         string headline = status.State switch
         {
-            "recording" => $"Recording {status.Elapsed:hh\\:mm\\:ss}",
-            "paused" => $"PAUSED at {status.Elapsed:hh\\:mm\\:ss} — resume when ready",
-            "stopping" or "finalizing" => "Finalising the recording",
+            "starting" => "Starting a recording",
+            "recording" => "Recording " + StatusPresentation.FormatElapsed(status.Elapsed),
+            "paused" => $"PAUSED at {StatusPresentation.FormatElapsed(status.Elapsed)} — resume when ready",
+            "suspended" => "Suspended while the PC sleeps — recording carries on after it wakes",
+            "stopping" or "finalizing" or "completed" => "Finalising the recording",
             "failed" => "RECORDING STOPPED — open Captr to see why",
             _ => status.State,
         };

@@ -35,6 +35,8 @@ public partial class DestinationEditorWindow
 {
     private readonly DestinationSettings? _editing;
 
+    private readonly List<string> _otherNames;
+
     /// <summary>True once the user has typed into the secret box, so an untouched box
     /// on an existing destination means "keep the stored secret" rather than "clear
     /// it".</summary>
@@ -44,9 +46,12 @@ public partial class DestinationEditorWindow
     public DestinationSettings? Result { get; private set; }
 
     /// <param name="existing">The destination being edited, or null to add a new one.</param>
-    public DestinationEditorWindow(DestinationSettings? existing = null)
+    /// <param name="otherNames">The names of every OTHER destination, so a clash is
+    /// refused here - before the secret is stored under the clashing name.</param>
+    public DestinationEditorWindow(DestinationSettings? existing = null, IEnumerable<string>? otherNames = null)
     {
         _editing = existing;
+        _otherNames = [.. otherNames ?? []];
         InitializeComponent();
 
         // A SharePoint destination has enough fields to outgrow a 1080p screen, which
@@ -183,6 +188,15 @@ public partial class DestinationEditorWindow
             return;
         }
 
+        // Checked here, not only when the page saves: the secret below is stored under
+        // a name derived from this one, so a second destination called "Archive"
+        // overwrote the first one's secret and THEN the save was refused.
+        if (_otherNames.Contains(name, StringComparer.OrdinalIgnoreCase))
+        {
+            ShowError($"Another destination is already called '{name}'. Choose a different name.");
+            return;
+        }
+
         if (kind.Kind == DestinationKind.Folder && string.IsNullOrWhiteSpace(FolderBox.Text))
         {
             ShowError("Choose the folder that finished recordings should be copied to.");
@@ -269,13 +283,10 @@ public partial class DestinationEditorWindow
             SecretBox.Clear();
             _secretEntered = false;
 
-            // A rename WITH a new secret leaves the old entry behind; take it out
-            // now rather than leaving a stale secret in the user's vault.
-            if (_editing?.CredentialName is { } previous && previous != wanted)
-            {
-                CredentialVault.Delete(previous);
-            }
-
+            // A rename WITH a new secret leaves the old entry behind. It is NOT removed
+            // here: if the page's save were then refused, settings.json would still
+            // name a secret that no longer exists. The page's save removes secrets no
+            // destination names any more, once the save has succeeded.
             return wanted;
         }
 

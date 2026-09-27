@@ -59,7 +59,12 @@ public partial class SettingsPage : Page
     /// </remarks>
     private async void EditDestination(DestinationSettings? existing)
     {
-        var dialog = new DestinationEditorWindow(existing) { Owner = Window.GetWindow(this) };
+        var dialog = new DestinationEditorWindow(
+            existing,
+            _viewModel.Destinations.Where(other => !ReferenceEquals(other, existing)).Select(other => other.Name))
+        {
+            Owner = Window.GetWindow(this),
+        };
         if (dialog.ShowDialog() == true && dialog.Result is { } destination)
         {
             _viewModel.UpsertDestination(destination, existing);

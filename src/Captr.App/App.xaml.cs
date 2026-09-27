@@ -16,7 +16,10 @@ namespace Captr.App;
 public partial class App : Application
 {
     /// <summary>Signalled by a second instance to ask the first to come forward.</summary>
-    private const string FocusSignalName = @"Local\CaptrUiFocus";
+    // Suffixed like the recorder's pipe when CAPTR_DATA_ROOT relocates Captr, so a
+    // relocated copy (the end-to-end tests) has a window of its own instead of
+    // handing focus to - and exiting in favour of - the user's own Captr.
+    private static readonly string FocusSignalName = @"Local\CaptrUiFocus" + Core.Common.CaptrPaths.InstanceSuffix;
 
     private Mutex? _singleInstance;
     private EventWaitHandle? _focusSignal;
@@ -42,10 +45,11 @@ public partial class App : Application
         DispatcherUnhandledException += OnUnexpectedError;
 
         // Single UI instance (SPEC §9): the second launch signals the first and exits.
-        _singleInstance = new Mutex(initiallyOwned: true, @"Local\CaptrUi", out bool isFirst);
+        _singleInstance = new Mutex(initiallyOwned: true, @"Local\CaptrUi" + Core.Common.CaptrPaths.InstanceSuffix, out bool isFirst);
         _focusSignal = new EventWaitHandle(false, EventResetMode.AutoReset, FocusSignalName);
         if (!isFirst)
         {
+            Core.Interop.ForegroundHandOff.AllowAnyProcess();
             _focusSignal.Set();
             Shutdown();
             return;

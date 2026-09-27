@@ -73,6 +73,31 @@ public static class StatusPresentation
         }
     }
 
+    /// <summary>
+    /// True while a recording exists in any form - being set up, running, paused,
+    /// suspended while the PC sleeps, or being written out. Start is meaningless then.
+    /// </summary>
+    /// <remarks>
+    /// The views listed the states they knew, and "starting", "suspended" and
+    /// "completed" fell through to Idle: the tray offered Start while a start was
+    /// already under way, and a recording held across sleep read as "Nothing is
+    /// recording".
+    /// </remarks>
+    public static bool IsActive(string state) =>
+        state is "starting" or "recording" or "paused" or "suspended" or "stopping" or "finalizing" or "completed";
+
+    /// <summary>True when Stop means something: the recording is running, paused, or
+    /// suspended, and no stop has been asked for yet.</summary>
+    public static bool CanStop(string state) => state is "recording" or "paused" or "suspended";
+
+    /// <summary>Elapsed time as hh:mm:ss with TOTAL hours, so a recording past a day
+    /// reads 25:00:00 instead of wrapping back to 01:00:00.</summary>
+    public static string FormatElapsed(TimeSpan? elapsed) =>
+        elapsed is { } value
+            ? string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"{(int)value.TotalHours:00}:{value.Minutes:00}:{value.Seconds:00}")
+            : "";
+
     /// <summary>One sentence for a failure: what happened, with a next step.</summary>
     public static string DescribeFailure(StatusResponse status) =>
         status.LastOutcome?.Reason is { Length: > 0 } reason

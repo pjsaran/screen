@@ -86,6 +86,26 @@ public class StatusPresentationTests
         tracker.Present(Idle(null)).State.ShouldBe("idle");
     }
 
+    [Theory]
+    [InlineData("starting")]
+    [InlineData("suspended")]
+    [InlineData("completed")]
+    public void Every_state_a_recording_can_be_in_counts_as_active(string state)
+    {
+        // These fell through to Idle: Start was offered during a start, and a
+        // recording held across sleep read as "Nothing is recording".
+        StatusPresentation.IsActive(state).ShouldBeTrue();
+        StatusPresentation.IsActive("idle").ShouldBeFalse();
+        StatusPresentation.IsActive(StatusPresentation.Failed).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Elapsed_time_past_a_day_keeps_counting_hours()
+    {
+        StatusPresentation.FormatElapsed(TimeSpan.FromHours(25) + TimeSpan.FromSeconds(7)).ShouldBe("25:00:07");
+        StatusPresentation.FormatElapsed(null).ShouldBe("");
+    }
+
     [Fact]
     public void A_failure_without_a_reason_still_says_what_to_do_next()
     {

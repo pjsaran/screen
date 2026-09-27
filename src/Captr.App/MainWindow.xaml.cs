@@ -157,12 +157,10 @@ public partial class MainWindow : IDisposable
     /// </summary>
     private void UpdateTrayMenu(StatusResponse status)
     {
-        bool busy = status.State is "recording" or "paused" or "stopping" or "finalizing";
-
-        TrayStartItem.IsEnabled = !busy;
+        TrayStartItem.IsEnabled = !StatusPresentation.IsActive(status.State);
 
         // Not while stopping or finalising: the stop has already been asked for.
-        TrayStopItem.IsEnabled = status.State is "recording" or "paused";
+        TrayStopItem.IsEnabled = StatusPresentation.CanStop(status.State);
 
         TrayPauseItem.IsEnabled = status.State == "recording";
         TrayResumeItem.IsEnabled = status.State == "paused";
@@ -174,9 +172,11 @@ public partial class MainWindow : IDisposable
     {
         (string label, string detail, string brushKey) = status.State switch
         {
-            "recording" => ("Recording", $"Elapsed {status.Elapsed:hh\\:mm\\:ss}", "SystemFillColorCriticalBrush"),
+            "starting" => ("Starting", "Getting the recording ready", "SystemFillColorCautionBrush"),
+            "recording" => ("Recording", "Elapsed " + StatusPresentation.FormatElapsed(status.Elapsed), "SystemFillColorCriticalBrush"),
             "paused" => ("Paused", "Resume when ready", "SystemFillColorCautionBrush"),
-            "stopping" or "finalizing" => ("Finalising", "Writing the final file", "SystemFillColorCautionBrush"),
+            "suspended" => ("Suspended", "The PC is asleep; recording carries on after it wakes", "SystemFillColorCautionBrush"),
+            "stopping" or "finalizing" or "completed" => ("Finalising", "Writing the final file", "SystemFillColorCautionBrush"),
             "failed" => ("Stopped", "Needs attention — see Home", "SystemFillColorCriticalBrush"),
             _ => ("Idle", "Nothing is recording", "TextFillColorTertiaryBrush"),
         };

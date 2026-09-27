@@ -119,3 +119,5 @@ GetConsoleWindow
 GenerateConsoleCtrlEvent
 SetConsoleCtrlHandler
 CTRL_C_EVENT
+AllowSetForegroundWindow
+ASFW_ANY
