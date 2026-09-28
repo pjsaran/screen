@@ -109,7 +109,7 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 - [x] CLI-19 destination folder validation accepts relative/ADS paths
 - [x] CLI-20 client leaks a pipe handle on a failed handshake
 - [x] CLI-21 malformed envelope logged; IPC request time limits
-- [ ] CLI-22 Ctrl+C exit code 130 undocumented
+- [x] CLI-22 Ctrl+C crashed instead of exiting 130; now 130, documented, tested
 - [x] CLI-23 masked secret entry: non-BMP, unwiped buffers, no console
 - [x] UI-13 Transfers refresh pile-up and focus loss
 - [x] UI-14 display preview caches a failure; keeps full-res bitmaps
@@ -118,12 +118,12 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 - [x] UI-17 dead code and stale comments in the App
 - [x] BLD-12 uninstall has no running-recording check
 - [x] BLD-14 pre-release versions accepted but break the build
-- [ ] BLD-15 docs call the GPL FFmpeg build LGPL
+- [x] BLD-15 docs call the GPL FFmpeg build LGPL
 - [x] BLD-17 CI: actions not SHA-pinned, no permissions block, no timeout
 - [x] BLD-18 normalise-line-endings regex never matches Windows paths; BOMs committed
 - [x] BLD-20 release script details (local-only tag check, notes not attached, Inno not re-verified)
-- [ ] DOC-1 `design-decisions.md` has contradictory tray-icon entries; docs disagree on blinking
-- [ ] DOC-2 `architecture.md` says settings are in `%APPDATA%`
+- [x] DOC-1 `design-decisions.md` has contradictory tray-icon entries; docs disagree on blinking
+- [x] DOC-2 `architecture.md` says settings are in `%APPDATA%`
 
 ## Code signing
 
@@ -134,7 +134,7 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 - [x] `build/Verify-Signatures.ps1`: unsigned / untimestamped / wrong subject fail the build
 - [x] Wired into `build.ps1` / `make-installer.ps1` / `new-release.ps1` / CI
 - [x] Tests for both scripts (dry run with no certificate; verify failure modes)
-- [ ] `releasing.md`: setup, CI secret names, local use, troubleshooting, SmartScreen note
+- [x] `releasing.md`: setup, CI secret names, local use, troubleshooting, SmartScreen note
 
 ## End-to-end
 
@@ -143,7 +143,7 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 - [x] upgrade from the previous release
 - [x] every CLI command and every documented exit code
 - [x] failure paths: disk full, missing/tampered FFmpeg, FFmpeg crash, unreachable destination, bad credentials, invalid naming pattern, session 0
-- [ ] `testing.md` requirement-coverage map updated
+- [x] `testing.md` requirement-coverage map updated
 
 ## UX (targeted; existing style kept)
 
@@ -154,7 +154,7 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 - [x] Naming-pattern live preview that flags invalid output
 - [x] Hotkey conflict detection (UI-7)
 - [x] Accessibility: screen-reader names, live regions, keyboard (UI-8), high contrast
-- [ ] Wording consistent across UI, CLI help and user guide
+- [x] Wording consistent across UI, CLI help and user guide
 
 ## Production readiness
 
@@ -163,13 +163,13 @@ Severity is the one assigned after checking the reviewer's evidence against the 
 - [x] Crash handler writes a useful local report (UI-1)
 - [x] Logs capped and rotated (20 MB per file, 14 files)
 - [x] Licence and third-party notices shipped (BLD-16)
-- [ ] Reproducible, signed, verified release artifacts
+- [~] Reproducible (verified: clean rebuilds byte-identical), signed and verified (test certificate only; real certificate is a manual check)
 
 ## Documentation and report
 
-- [ ] `docs/user-guide/` updated for behaviour changes
-- [ ] `docs/developer-guide/` updated for process changes
-- [ ] `docs/developer-guide/release-verification.md` manual checks
+- [x] `docs/user-guide/` updated for behaviour changes
+- [x] `docs/developer-guide/` updated for process changes
+- [x] `docs/developer-guide/release-verification.md` manual checks
 - [x] `REVIEW.md`
 
 ## Found during the work

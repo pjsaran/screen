@@ -159,7 +159,7 @@ hashes are on the release branch.
 | CLI-19 | Destination folder validation accepted relative and ADS paths | `Naming/OutputNamer.cs` | Fixed dd1dc6a; naming and validator tests |
 | CLI-20 | Client leaked a pipe handle on a failed handshake | `Ipc/IpcClient.cs` | Fixed 5fc6541 |
 | CLI-21 | No IPC request timeouts; malformed envelope unlogged | `Ipc/IpcClient.cs`, `IpcServer.cs` | Fixed 5fc6541 (server), 57d0793 (client limits) |
-| CLI-22 | Ctrl+C exit code 130 undocumented | docs | Documented (user guide) |
+| CLI-22 | Ctrl+C exit code 130 undocumented — and, found while documenting it, Ctrl+C during a wait on the recorder crashed (0xE0434352) instead of exiting 130 | `Cli/CliApplication.cs` | Fixed 58c1de4; E2E sends a real Ctrl+C to `captr start` (fails before the fix); documented |
 | CLI-23 | Masked secret entry: non-BMP characters, unwiped buffers, no console | `Cli/CliApplication.cs` | Fixed 57d0793; CLI E2E for the piped limit |
 | UI-13 | Transfers refresh pile-up and focus loss | `ViewModels/TransfersViewModel.cs` | Fixed c1e0a79 |
 | UI-14 | Display preview cached a failure; kept full-resolution bitmaps | `Services/DisplayPreviewService.cs` | Fixed a2d865a |
@@ -187,6 +187,13 @@ hashes are on the release branch.
 - `new-release.ps1` would publish an unsigned release after a warning (975f5dc).
 - An FFmpeg adoption unit test failed intermittently on a `MainModule` race
   (193ddb1).
+- Ctrl+C in the CLI crashed instead of exiting 130 (58c1de4).
+- Documentation that contradicted the code, beyond DOC-1/DOC-2 and BLD-15: the
+  tray icon's behaviour and the page count in getting-started, a retention
+  condition the code never checked, "all four" release attachments (three), a
+  SharePoint folder example that would nest "Shared Documents" inside the library,
+  the golden-file count, the Cli README's `--json` claim, and two design-decision
+  entries overtaken by this work (notes added; entries kept).
 
 ## Code signing
 
