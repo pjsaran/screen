@@ -59,16 +59,8 @@ try {
     # commit here instead, fail early with the real reason, and hand it to MSBuild
     # through the environment (MSBuild reads env vars as properties, and the targets
     # file skips its own git call when SourceRevisionId is already set).
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        throw 'git is not on the PATH, so the build cannot stamp its source commit. Install Git for Windows (https://git-scm.com) and reopen the terminal.'
-    }
-    $gitOutput = & git -C $RepoRoot rev-parse --short=12 HEAD 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw ("git cannot read the commit for $RepoRoot`:`n$($gitOutput | Out-String)" +
-               "If it says 'dubious ownership', run:  git config --global --add safe.directory `"$RepoRoot`"`n" +
-               "If it says 'not a git repository', this folder was copied rather than cloned; clone it with git instead.")
-    }
-    $env:SourceRevisionId = "$gitOutput".Trim()
+    . (Join-Path $PSScriptRoot 'lib\SourceCommit.ps1')
+    $env:SourceRevisionId = Get-SourceCommit -RepoRoot $RepoRoot
     Write-Host "Source commit: $env:SourceRevisionId"
 
     Write-Host '== 2/7 Licence gate ===========================================' -ForegroundColor Cyan

@@ -195,3 +195,7 @@ to build.
 | `'0.2.0-beta.1' is not a valid version` | Pre-release suffixes are not supported; use `MAJOR.MINOR.PATCH`. |
 | `Refusing to sign …\ffmpeg.exe: it is not the pinned FFmpeg build` | `publish/` holds an FFmpeg other than the one fetched and verified. Run `pwsh build/fetch-ffmpeg.ps1` and publish again. |
 | Tests fail with a file-load or "blocked" error on a PC with Smart App Control | See [Smart App Control](#smart-app-control-on-a-development-machine). |
+| `The git repository at … has no commits` (git: `Needed a single revision`) | The folder was copied or unzipped and then `git init`-ed. The build stamps every binary with its source commit, so it needs a real clone: `git clone https://github.com/pjsaran/screen.git`. `safe.directory` does not help here. |
+| `… is not a clone of Captr: git is reading the repository at …` | The folder sits inside another repository (for example `C:\Projects` was `git init`-ed). Clone Captr somewhere outside it. |
+| `git refuses to read … owned by another account` (`dubious ownership`) | Run the `git config --global --add safe.directory …` command the build prints. |
+| `… is not a git clone` | The folder was copied rather than cloned. Clone it. |
