@@ -325,3 +325,32 @@ are in `docs/developer-guide/release-verification.md`.
 - Review of a real support bundle before sending it.
 
 ## Final run
+
+All on this machine (Windows 11 26200, NVIDIA GPU, one desktop), on the release
+branch.
+
+| Run | Commit | Result |
+|---|---|---|
+| `build.ps1 -Installer -Full`: format gate, licence gate, warnings-as-errors build | adb8fba | pass |
+| Unit tests | adb8fba | 471 / 471, none skipped |
+| Integration, default build (Os, Ffmpeg, Chaos, uncategorised) | adb8fba | 86 / 86, none skipped |
+| Integration after publish (Published, Display, Gpu, Soak) | adb8fba | 64 / 64, none skipped |
+| Installer built (unsigned: no certificate here) | adb8fba | yes |
+| Installer end to end, including the upgrade from the 0.1.1 release | adb8fba | 4 / 4, none skipped |
+| Signing dry run, no certificate | adb8fba | pass |
+| Reproducibility: two clean publishes from one commit | adb8fba | Captr's 9 files byte-identical |
+| After the last code change (58c1de4, Ctrl+C): publish build, format gate, the new Ctrl+C E2E test, unit tests | 3962809 | pass; 471 / 471 |
+
+Between adb8fba and the final commit, the only code change is 58c1de4 (the
+CLI's Ctrl+C handling and its test); the rest is documentation and comments. A
+second full `build.ps1 -Installer -Full` on the final commit was started and
+stopped by the tool at the formatting stage because the machine ran low on
+memory — not a failure. It should be re-run once before tagging:
+`pwsh build/build.ps1 -Installer -Full`, then
+`dotnet test tests/Captr.Integration.Tests -c Release --no-build --filter Category=Installer`
+with `CAPTR_PREVIOUS_INSTALLER` pointing at the 0.1.1 installer.
+
+Smart App Control on this machine intermittently blocks freshly built, unsigned
+test binaries ("An Application Control policy has blocked this file"). Where it
+did, the binaries were rebuilt with a different `SourceRevisionId` and the run
+repeated; no test was skipped or excused because of it. A signed build avoids it.
