@@ -22,13 +22,11 @@ These are a contract. Scripts may branch on them.
 | `3` | No recorder answered: none was running and none could be started, or the recorder did not answer a request in time (see [time limits](#time-limits)). |
 | `10` | `status` only: idle, nothing is recording. |
 | `11` | `status` only: a recording exists but is paused. |
-| `130` | Interrupted with Ctrl+C. This is System.CommandLine's convention, and it is what you get when the command has not finished within two seconds of Ctrl+C. |
+| `130` | Interrupted with Ctrl+C (the conventional 128 + SIGINT). |
 
 Ctrl+C ends the `captr` command, never the recorder: whatever the recorder was asked
-to do, it carries on, so check with `captr status`. Pressed while a command is
-waiting for the recorder, Ctrl+C currently ends the command with Windows' generic
-crash code rather than `130`, and leaves a `crash-cli-*.txt` report in the logs
-folder. Treat any code not in this table as a failure.
+to do, it carries on, so check with `captr status`. Treat any code not in this table
+as a failure.
 
 When something unexpected goes wrong, `captr` prints one line saying what failed and
 exits `1` (or `3` if the recorder could not be reached). It never prints a stack
