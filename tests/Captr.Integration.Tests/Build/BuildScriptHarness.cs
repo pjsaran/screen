@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 using Shouldly;
 
@@ -9,7 +10,7 @@ namespace Captr.Integration.Tests.Build;
 /// `pwsh -NoProfile -File`, output captured — so their behaviour can be asserted
 /// like any other code's.
 /// </summary>
-internal static class BuildScriptHarness
+internal static partial class BuildScriptHarness
 {
     /// <summary>The repository root, found by walking up to <c>Captr.slnx</c>.</summary>
     public static string RepoRoot()
@@ -75,6 +76,29 @@ internal static class BuildScriptHarness
             throw new TimeoutException($"{Path.GetFileName(scriptPath)} did not finish.");
         }
 
-        return (process.ExitCode, await stdout + await stderr);
+        return (process.ExitCode, Unwrap(await stdout + await stderr));
     }
+
+    /// <summary>
+    /// The output as the script wrote it, not as PowerShell laid it out. With its
+    /// output redirected, PowerShell draws an error at a fixed console width: the
+    /// message is broken across "     | " continuation lines, with colour codes.
+    /// Where the break falls depends on the length of the temp path - which contains
+    /// the Windows user name - so an assertion on a phrase passed on one PC and
+    /// failed on another. Colour codes are removed and continuation lines rejoined
+    /// (PowerShell breaks at a space, so a single space restores the message).
+    /// </summary>
+    internal static string Unwrap(string output)
+    {
+        string plain = AnsiEscape().Replace(output, "");
+        return ContinuationLine().Replace(plain, " ");
+    }
+
+    [GeneratedRegex(@"\x1B\[[0-9;?]*[A-Za-z]")]
+    private static partial Regex AnsiEscape();
+
+    /// <summary>A line break followed by the indented "|" PowerShell continues an
+    /// error message with.</summary>
+    [GeneratedRegex(@"[ \t]*\r?\n[ \t]+\|[ \t]?")]
+    private static partial Regex ContinuationLine();
 }
