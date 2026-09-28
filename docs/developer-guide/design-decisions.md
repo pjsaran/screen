@@ -145,6 +145,10 @@ three different events and were previously indistinguishable — the installer s
 proceeded. Each is now named, with its consequences, and silent installs are
 unaffected because they take the default answer.
 
+*Note: a silent install no longer asks anything at all (a hidden prompt waited for
+ever under `/VERYSILENT` without `/SUPPRESSMSGBOXES`). A silent reinstall or upgrade
+proceeds; a silent downgrade is refused with exit code 1 unless `/ALLOWDOWNGRADE=yes`.*
+
 **A first install creates settings.json.** By calling `captr settings init`, not by
 writing JSON from the installer script: the defaults, the schema version, and the
 validation then all come from the product and the script cannot drift from them. It
@@ -333,6 +337,11 @@ mandatory to prevent: `ExecutionStateHolder` holds a system-and-display-required
 execution state for the whole session, because a powered-off display makes Desktop
 Duplication return black frames — a recording that looks healthy and contains
 nothing.
+
+*Note: the mechanism is now a Windows power request (PowerCreateRequest, system and
+display required) held by `ExecutionStateHolder`, not a thread's execution state,
+which vanished whenever the thread that set it was not the one that ended. The
+decision is unchanged.*
 
 The screen saver and the workstation lock are a different mechanism and not ours to
 touch. Both run off the input-idle timer — time since a real keystroke or mouse move

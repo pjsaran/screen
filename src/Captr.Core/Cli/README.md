@@ -12,8 +12,11 @@ Design rules from SPEC §10, encoded here:
 - **Idempotent by design**: `start` while recording and `stop` while idle both
   report the actual state and exit `0` — schedulers fire twice more often than
   anyone expects.
-- **Errors to stderr, results to stdout**, and every command has `--json` for
-  machine consumption.
+- **Errors to stderr, results to stdout**, and the commands that report state
+  (`start`, `stop`, `pause`, `resume`, `status`, `recordings`, `transfers`,
+  `recover`, `version`, `doctor`, `settings init`, `settings get`) take `--json`
+  for machine consumption. `settings export` always prints JSON; `settings set`,
+  `settings import` and `auth` do not take it.
 - Commands that summon work (`start`, `recover`) launch a host when none is
   running; pure queries (`status`, `stop`, `pause`, `resume`) treat "no host" as
   "idle" rather than spawning one. `recordings` and `verify` read the working

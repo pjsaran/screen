@@ -11,9 +11,10 @@
       4. dotnet build -warnaserror (Release by default)
       5. dotnet test (unit always; integration filtered by -TestFilter)
       6. dotnet publish self-contained win-x64 into publish/ (App + CLI share a folder)
-      7. -Installer: build/make-installer.ps1 (arrives with WP11)
-    Signing happens inside publish/installer steps via build/sign.ps1 and is skipped
-    with a prominent warning when the CAPTR_SIGN_* environment variables are absent.
+      7. -Installer: build/make-installer.ps1
+    Signing happens inside the publish and installer steps via build/Sign-Artifacts.ps1,
+    and is skipped with a prominent warning when no CAPTR_SIGN_* method is configured
+    (-RequireSigning makes that a failure).
 
 .PARAMETER Full
     Also run local-machine-only test categories (Display, Gpu) that need a real
