@@ -90,7 +90,16 @@ public static class CliApplication
             await Console.Error.WriteLineAsync(exception.Message);
             return ExitCodes.HostUnreachable;
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C while waiting on the recorder. This escaped unhandled - exit
+            // 0xE0434352 and a crash report - instead of the documented 130. The
+            // recorder is a separate process: a start it had already begun carries on.
+            await Console.Error.WriteLineAsync(
+                "Cancelled. The recorder keeps doing whatever it had already started; check with 'captr status'.");
+            return ExitCodes.Cancelled;
+        }
+        catch (Exception exception)
         {
             string? details = WriteErrorDetails(args, exception);
             await Console.Error.WriteLineAsync(

@@ -208,6 +208,76 @@ public sealed class RecordingEndToEndTests : IDisposable
     }
 
     [Fact]
+    public async Task Ctrl_C_while_start_waits_exits_130_with_a_message()
+    {
+        // A fresh data root: the first start proves an encoder, so 'captr start'
+        // waits on the recorder for several seconds - the moment someone presses
+        // Ctrl+C. That used to escape as an unhandled exception (0xE0434352).
+        await ConfigureAsync();
+        var startInfo = new ProcessStartInfo(PublishedPayload.Cli(), "start")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true, // a console of its own, to receive Ctrl+C on
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.Environment[Captr.Core.Common.CaptrPaths.DataRootVariable] = DataRoot;
+
+        using Process cli = Process.Start(startInfo)!;
+        Task<string> stdout = cli.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        Task<string> stderr = cli.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await Task.Delay(1500, TestContext.Current.CancellationToken);
+        cli.HasExited.ShouldBeFalse("start is still waiting on the recorder");
+
+        (await SendCtrlCAsync(cli.Id)).ShouldBe(0, "Ctrl+C could not be delivered to the CLI's console");
+        await cli.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        string output = await stdout + await stderr;
+        cli.ExitCode.ShouldBe(ExitCodes.Cancelled, output);
+        output.ShouldContain("Cancelled");
+
+        // The recorder is a separate process and may have begun recording: end it.
+        await RunAsync("stop");
+        await EndToEnd.WaitUntilIdleAsync(PublishedPayload.Cli(), DataRoot, TimeSpan.FromMinutes(3));
+    }
+
+    /// <summary>
+    /// Delivers Ctrl+C to another process's console, from a helper with no console of
+    /// its own - the only way Windows allows it (the test runner has one). The same
+    /// mechanism Captr uses to stop an orphaned encoder cleanly.
+    /// </summary>
+    private static async Task<int> SendCtrlCAsync(int processId)
+    {
+        string script = $$"""
+            Add-Type -Namespace CtrlC -Name Native -MemberDefinition @'
+            [DllImport("kernel32.dll")] public static extern bool FreeConsole();
+            [DllImport("kernel32.dll")] public static extern bool AttachConsole(uint processId);
+            [DllImport("kernel32.dll")] public static extern bool SetConsoleCtrlHandler(System.IntPtr handler, bool add);
+            [DllImport("kernel32.dll")] public static extern bool GenerateConsoleCtrlEvent(uint ctrlEvent, uint group);
+            '@
+            [CtrlC.Native]::FreeConsole() | Out-Null
+            if (-not [CtrlC.Native]::AttachConsole({{processId}})) { exit 2 }
+            [CtrlC.Native]::SetConsoleCtrlHandler([System.IntPtr]::Zero, $true) | Out-Null
+            if (-not [CtrlC.Native]::GenerateConsoleCtrlEvent(0, 0)) { exit 3 }
+            Start-Sleep -Milliseconds 500
+            exit 0
+            """;
+        var startInfo = new ProcessStartInfo("pwsh")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-EncodedCommand");
+        startInfo.ArgumentList.Add(Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script)));
+
+        using Process helper = Process.Start(startInfo)!;
+        await helper.WaitForExitAsync(TestContext.Current.CancellationToken);
+        return helper.ExitCode;
+    }
+
+    [Fact]
     public async Task A_missing_ffmpeg_refuses_to_start_and_says_to_reinstall()
     {
         await ConfigureAsync();

@@ -26,4 +26,8 @@ public static class ExitCodes
 
     /// <summary>`status`: a recording exists but is paused.</summary>
     public const int Paused = 11;
+
+    /// <summary>Cancelled with Ctrl+C: the conventional 128 + SIGINT, which is also
+    /// what System.CommandLine returns when a command ignores the cancellation.</summary>
+    public const int Cancelled = 130;
 }
